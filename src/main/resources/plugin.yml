@@ -1,0 +1,48 @@
+name: PlayerCouncil
+version: '${project.version}'
+main: com.lawlessmc.playercouncil.PlayerCouncilPlugin
+api-version: '1.21'
+authors: [wilderop]
+description: Activity-based Player Council with voting for bans, gamerules, and plugins
+website: https://github.com/wilderop/PlayerCouncil
+
+commands:
+  council:
+    description: View council members and your status
+    usage: /council
+    permission: playercouncil.use
+  proposals:
+    description: List active proposals
+    usage: /proposals
+    permission: playercouncil.use
+  propose:
+    description: Create a new proposal (council only)
+    usage: /propose <type> <args...>
+    permission: playercouncil.council
+  vote:
+    description: Vote on a proposal
+    usage: /vote <id> <yes|no>
+    permission: playercouncil.council
+  cancelproposal:
+    description: Cancel your own proposal
+    usage: /cancelproposal <id>
+    permission: playercouncil.council
+  activity:
+    description: View activity rankings
+    usage: /activity [week|month]
+    permission: playercouncil.use
+  counciladmin:
+    description: Admin commands for the council system
+    usage: /counciladmin <reload|recalc|setsize|whitelist>
+    permission: playercouncil.admin
+
+permissions:
+  playercouncil.use:
+    description: Basic access to view council and proposals
+    default: true
+  playercouncil.council:
+    description: Council member powers (propose, vote)
+    default: false
+  playercouncil.admin:
+    description: Admin control of the plugin
+    default: op
