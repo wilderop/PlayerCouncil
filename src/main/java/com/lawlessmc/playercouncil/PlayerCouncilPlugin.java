@@ -1,7 +1,6 @@
 package com.lawlessmc.playercouncil;
 
 import com.lawlessmc.playercouncil.commands.*;
-import com.lawlessmc.playercouncil.listeners.BlockListener;
 import com.lawlessmc.playercouncil.listeners.PlayerListener;
 import com.lawlessmc.playercouncil.managers.*;
 import com.lawlessmc.playercouncil.storage.DatabaseManager;
@@ -34,19 +33,21 @@ public class PlayerCouncilPlugin extends JavaPlugin {
         this.discordWebhook = new DiscordWebhook(this);
 
         registerCommands();
-        registerListeners();
+        getServer().getPluginManager().registerEvents(new PlayerListener(this), this);
 
-        // Recalculate council on startup
         getServer().getScheduler().runTaskLater(this, () -> {
+            proposalManager.applyPendingPluginActions();
+            councilManager.loadFromDatabase();
             councilManager.recalculateCouncil();
             getLogger().info("Council seats recalculated on startup.");
         }, 40L);
 
-        // Periodic recalc
+        getServer().getScheduler().runTaskTimerAsynchronously(this, () ->
+                databaseManager.pruneOldSnapshots(30), 20L * 60 * 60, 20L * 60 * 60 * 24);
+
         long intervalTicks = getConfig().getLong("council.recalc-interval-hours", 24) * 20L * 60L * 60L;
-        getServer().getScheduler().runTaskTimerAsynchronously(this, () -> {
-            getServer().getScheduler().runTask(this, () -> councilManager.recalculateCouncil());
-        }, intervalTicks, intervalTicks);
+        getServer().getScheduler().runTaskTimer(this, () ->
+                councilManager.recalculateCouncil(), intervalTicks, intervalTicks);
 
         getLogger().info("PlayerCouncil enabled.");
     }
@@ -67,11 +68,6 @@ public class PlayerCouncilPlugin extends JavaPlugin {
         getCommand("cancelproposal").setExecutor(new CancelProposalCommand(this));
         getCommand("activity").setExecutor(new ActivityCommand(this));
         getCommand("counciladmin").setExecutor(new CouncilAdminCommand(this));
-    }
-
-    private void registerListeners() {
-        getServer().getPluginManager().registerEvents(new PlayerListener(this), this);
-        getServer().getPluginManager().registerEvents(new BlockListener(this), this);
     }
 
     public static PlayerCouncilPlugin getInstance() {
