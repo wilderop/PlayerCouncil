@@ -1,6 +1,6 @@
 # PlayerCouncil
 
-Paper plugin: activity-based Player Council with voting for bans, gamerules, and plugin toggles.
+Paper plugin that ranks players by real activity metrics and forms a **Player Council** with democratic voting powers.
 
 ## Performance model
 - Activity is sampled **only on login and logout** from vanilla player statistics.
@@ -13,6 +13,11 @@ Paper plugin: activity-based Player Council with voting for bans, gamerules, and
 - Walk distance (`WALK_ONE_CM`)
 - Elytra distance (`AVIATE_ONE_CM`)
 - Mob kills (`MOB_KILLS`)
+
+## Ban ladder (automatic)
+- `/propose ban <player>` / `/propose unban <player>`
+- System picks BAN/PARDON/REBAN/REPARDON and vote thresholds (1/2/4/8) from stored ladder stage
+- Sitting council members cannot be removed with a 1-vote ban
 
 ## Build
 ```bash
