@@ -64,7 +64,7 @@ public class PlayerCouncilPlugin extends JavaPlugin {
         getCommand("council").setExecutor(new CouncilCommand(this));
         getCommand("proposals").setExecutor(new ProposalsCommand(this));
         getCommand("propose").setExecutor(new ProposeCommand(this));
-        getCommand("vote").setExecutor(new VoteCommand(this));
+        getCommand("councilvote").setExecutor(new VoteCommand(this));
         getCommand("cancelproposal").setExecutor(new CancelProposalCommand(this));
         getCommand("activity").setExecutor(new ActivityCommand(this));
         getCommand("counciladmin").setExecutor(new CouncilAdminCommand(this));

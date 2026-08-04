@@ -31,12 +31,11 @@ public class VoteCommand implements CommandExecutor {
             int have = plugin.getCouncilManager().getCouncilMembers().size();
             player.sendMessage(mm.deserialize(
                     "<red>Council voting is not active yet. Need at least <yellow>" + need +
-                    "</yellow> members (currently <yellow>" + have + "</yellow>)."))
-            ;
+                    "</yellow> members (currently <yellow>" + have + "</yellow>)."));
             return true;
         }
         if (args.length < 2) {
-            player.sendMessage(mm.deserialize("<red>Usage: /vote <id> <yes|no>"));
+            player.sendMessage(mm.deserialize("<red>Usage: /councilvote <id> <yes|no>"));
             return true;
         }
 
