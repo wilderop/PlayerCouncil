@@ -5,6 +5,9 @@ council:
   size: 12
   # Minimum total playtime in hours required to be eligible for council
   min-total-hours: 10
+  # Minimum number of filled council seats required before proposals/bans are allowed.
+  # Until this many members exist, the voting system stays inactive.
+  min-active-members: 3
   # How often (in hours) to recalculate rankings and update council seats
   recalc-interval-hours: 24
 
@@ -40,6 +43,10 @@ discord:
 
 plugins:
   # List of plugin names that the council is allowed to enable/disable
+  # Example:
+  # whitelist:
+  #   - SomePlugin
+  #   - AnotherPlugin
   whitelist: []
 
 messages:
