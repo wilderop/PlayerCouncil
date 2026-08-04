@@ -21,7 +21,7 @@ public class CouncilManager {
 
     public void recalculateCouncil() {
         int size = plugin.getConfig().getInt("council.size", 12);
-        int minHours = plugin.getConfig().getInt("council.min-total-hours", 10);
+        int minHours = plugin.getConfig().getInt("council.min-total-hours", 100);
         long since = System.currentTimeMillis() - (30L * 24 * 60 * 60 * 1000);
 
         plugin.getActivityManager().getRankedPlayersAsync(since, minHours)

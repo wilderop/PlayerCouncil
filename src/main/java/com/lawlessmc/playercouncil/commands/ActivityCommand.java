@@ -7,7 +7,6 @@ import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 
-import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
@@ -33,7 +32,7 @@ public class ActivityCommand implements CommandExecutor {
             labelPeriod = "Last 30 days";
         }
 
-        int minHours = plugin.getConfig().getInt("council.min-total-hours", 10);
+        int minHours = plugin.getConfig().getInt("council.min-total-hours", 100);
         sender.sendMessage(mm.deserialize("<gray>Loading rankings..."));
 
         plugin.getActivityManager().getRankedPlayersAsync(since, minHours)

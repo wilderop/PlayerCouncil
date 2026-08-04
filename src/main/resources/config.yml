@@ -1,12 +1,18 @@
 # PlayerCouncil Configuration
 
 council:
+  # Number of seats on the council
   size: 12
-  min-total-hours: 10
+  # Minimum total playtime in hours required to be eligible for council
+  min-total-hours: 100
+  # Minimum number of filled council seats required before proposals/bans are allowed.
+  # Until this many members exist, the voting system stays inactive.
   min-active-members: 3
+  # How often (in hours) to recalculate rankings and update council seats
   recalc-interval-hours: 24
 
 activity:
+  # Weights for each metric (vanilla stats only: playtime, walk, fly, mob kills)
   weights:
     playtime: 1.0
     walk: 1.0
@@ -28,6 +34,7 @@ discord:
   username: "Player Council"
 
 plugins:
+  # Plugins the council may enable/disable
   whitelist: []
 
 messages:
