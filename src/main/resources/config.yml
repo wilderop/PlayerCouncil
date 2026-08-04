@@ -1,52 +1,33 @@
 # PlayerCouncil Configuration
 
 council:
-  # Number of seats on the council
   size: 12
-  # Minimum total playtime in hours required to be eligible for council
   min-total-hours: 10
-  # Minimum number of filled council seats required before proposals/bans are allowed.
-  # Until this many members exist, the voting system stays inactive.
   min-active-members: 3
-  # How often (in hours) to recalculate rankings and update council seats
   recalc-interval-hours: 24
 
 activity:
-  # Weights for each metric (all equal by default)
   weights:
     playtime: 1.0
     walk: 1.0
     fly: 1.0
     mob_kills: 1.0
-    blocks_broken: 1.0
-    blocks_placed: 1.0
 
 voting:
-  # Required votes for different actions
   ban: 1
   pardon: 2
   reban: 4
   repardon: 8
-  # Required votes for gamerule / plugin changes
   gamerule: 8
   plugin: 8
-  # Proposal timeout in days
   proposal-timeout-days: 7
-  # Minutes of warning before automatic restart for plugin toggles
   restart-warning-minutes: 10
 
 discord:
-  # Webhook URL for broadcasting proposals and votes (leave blank to disable)
   webhook-url: ""
-  # Username shown in Discord
   username: "Player Council"
 
 plugins:
-  # List of plugin names that the council is allowed to enable/disable
-  # Example:
-  # whitelist:
-  #   - SomePlugin
-  #   - AnotherPlugin
   whitelist: []
 
 messages:
