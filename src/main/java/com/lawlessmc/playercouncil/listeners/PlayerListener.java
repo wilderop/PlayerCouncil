@@ -10,6 +10,7 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 
+import java.util.Map;
 import java.util.UUID;
 
 public class PlayerListener implements Listener {
@@ -39,13 +40,12 @@ public class PlayerListener implements Listener {
         UUID uuid = player.getUniqueId();
         String name = player.getName();
         long firstPlayed = player.getFirstPlayed();
-        long playtime = player.getStatistic(Statistic.PLAY_ONE_MINUTE);
-        long walk = player.getStatistic(Statistic.WALK_ONE_CM);
-        long fly = player.getStatistic(Statistic.AVIATE_ONE_CM);
-        long mobKills = player.getStatistic(Statistic.MOB_KILLS);
         long now = System.currentTimeMillis();
 
-        ActivitySnapshot snap = new ActivitySnapshot(uuid, now, playtime, walk, fly, mobKills);
+        Map<String, Long> values = plugin.getTrackedStats().capture(player);
+        long playtime = values.getOrDefault(Statistic.PLAY_ONE_MINUTE.name(), 0L);
+
+        ActivitySnapshot snap = new ActivitySnapshot(uuid, now, values);
         plugin.getDatabaseManager().saveSnapshot(snap);
         plugin.getDatabaseManager().upsertPlayerMeta(uuid, name, firstPlayed, playtime);
     }

@@ -1,28 +1,26 @@
 package com.lawlessmc.playercouncil.models;
 
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.Map;
+
 public class ActivityDelta {
 
-    private final long playtime;
-    private final long walk;
-    private final long fly;
-    private final long mobKills;
+    private final Map<String, Long> deltas;
 
-    public ActivityDelta(long playtime, long walk, long fly, long mobKills) {
-        this.playtime = Math.max(0, playtime);
-        this.walk = Math.max(0, walk);
-        this.fly = Math.max(0, fly);
-        this.mobKills = Math.max(0, mobKills);
+    public ActivityDelta(Map<String, Long> deltas) {
+        Map<String, Long> copy = new LinkedHashMap<>();
+        for (Map.Entry<String, Long> e : deltas.entrySet()) {
+            copy.put(e.getKey(), Math.max(0, e.getValue()));
+        }
+        this.deltas = Collections.unmodifiableMap(copy);
     }
 
-    public long getPlaytime() { return playtime; }
-    public long getWalk() { return walk; }
-    public long getFly() { return fly; }
-    public long getMobKills() { return mobKills; }
+    public Map<String, Long> getDeltas() {
+        return deltas;
+    }
 
-    public double score(double wPlay, double wWalk, double wFly, double wMob) {
-        double playHours = playtime / 20.0 / 3600.0;
-        double walkKm = walk / 100000.0;
-        double flyKm = fly / 100000.0;
-        return (playHours * wPlay) + (walkKm * wWalk) + (flyKm * wFly) + (mobKills * wMob);
+    public long get(String stat) {
+        return deltas.getOrDefault(stat, 0L);
     }
 }
