@@ -28,9 +28,7 @@ public class DatabaseManager {
         runSync(() -> {
             try {
                 File dbFile = new File(plugin.getDataFolder(), "playercouncil.db");
-                if (!plugin.getDataFolder().exists()) {
-                    plugin.getDataFolder().mkdirs();
-                }
+                if (!plugin.getDataFolder().exists()) plugin.getDataFolder().mkdirs();
                 connection = DriverManager.getConnection("jdbc:sqlite:" + dbFile.getAbsolutePath());
                 try (Statement st = connection.createStatement()) {
                     st.execute("PRAGMA journal_mode=WAL");
@@ -51,28 +49,42 @@ public class DatabaseManager {
             st.execute("CREATE TABLE IF NOT EXISTS snapshots (uuid TEXT NOT NULL, timestamp INTEGER NOT NULL, playtime INTEGER NOT NULL, walk INTEGER NOT NULL, fly INTEGER NOT NULL, mob_kills INTEGER NOT NULL, PRIMARY KEY (uuid, timestamp))");
             st.execute("CREATE TABLE IF NOT EXISTS player_meta (uuid TEXT PRIMARY KEY, name TEXT, first_join INTEGER, total_playtime INTEGER DEFAULT 0)");
             st.execute("CREATE TABLE IF NOT EXISTS proposals (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL, proposer TEXT NOT NULL, target TEXT NOT NULL, value TEXT, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, cancelled INTEGER DEFAULT 0, executed INTEGER DEFAULT 0)");
-            st.execute("CREATE TABLE IF NOT EXISTS votes (proposal_id INTEGER NOT NULL, voter TEXT NOT NULL, yes INTEGER NOT NULL, PRIMARY KEY (proposal_id, voter), FOREIGN KEY (proposal_id) REFERENCES proposals(id))");
+            st.execute("CREATE TABLE IF NOT EXISTS votes (proposal_id INTEGER NOT NULL, voter TEXT NOT NULL, yes INTEGER NOT NULL, PRIMARY KEY (proposal_id, voter))");
             st.execute("CREATE TABLE IF NOT EXISTS council (uuid TEXT PRIMARY KEY, name TEXT, rank INTEGER)");
             st.execute("CREATE TABLE IF NOT EXISTS audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp INTEGER NOT NULL, message TEXT NOT NULL)");
             st.execute("CREATE TABLE IF NOT EXISTS pending_plugin_actions (plugin_name TEXT PRIMARY KEY, enable INTEGER NOT NULL)");
             st.execute("CREATE TABLE IF NOT EXISTS ban_ladder (uuid TEXT PRIMARY KEY, name TEXT, stage INTEGER NOT NULL DEFAULT 0)");
+            st.execute("CREATE TABLE IF NOT EXISTS snapshot_stats (uuid TEXT NOT NULL, timestamp INTEGER NOT NULL, stat TEXT NOT NULL, value INTEGER NOT NULL, PRIMARY KEY (uuid, timestamp, stat))");
+            migrateLegacySnapshots(st);
+        }
+    }
+
+    private void migrateLegacySnapshots(Statement st) throws SQLException {
+        try {
+            var rs = st.executeQuery("PRAGMA table_info(snapshots)");
+            boolean hasPlaytime = false;
+            while (rs.next()) {
+                if ("playtime".equalsIgnoreCase(rs.getString("name"))) { hasPlaytime = true; break; }
+            }
+            if (!hasPlaytime) return;
+            st.execute("INSERT OR IGNORE INTO snapshot_stats (uuid, timestamp, stat, value) SELECT uuid, timestamp, 'PLAY_ONE_MINUTE', playtime FROM snapshots WHERE playtime IS NOT NULL");
+            st.execute("INSERT OR IGNORE INTO snapshot_stats (uuid, timestamp, stat, value) SELECT uuid, timestamp, 'WALK_ONE_CM', walk FROM snapshots WHERE walk IS NOT NULL");
+            st.execute("INSERT OR IGNORE INTO snapshot_stats (uuid, timestamp, stat, value) SELECT uuid, timestamp, 'AVIATE_ONE_CM', fly FROM snapshots WHERE fly IS NOT NULL");
+            st.execute("INSERT OR IGNORE INTO snapshot_stats (uuid, timestamp, stat, value) SELECT uuid, timestamp, 'MOB_KILLS', mob_kills FROM snapshots WHERE mob_kills IS NOT NULL");
+        } catch (SQLException e) {
+            plugin.getLogger().info("Legacy snapshot migration skipped: " + e.getMessage());
         }
     }
 
     public void runSync(Runnable work) {
-        try {
-            dbExecutor.submit(work).get(30, TimeUnit.SECONDS);
-        } catch (Exception e) {
-            plugin.getLogger().severe("DB sync task failed: " + e.getMessage());
-            e.printStackTrace();
-        }
+        try { dbExecutor.submit(work).get(30, TimeUnit.SECONDS); }
+        catch (Exception e) { plugin.getLogger().severe("DB sync task failed: " + e.getMessage()); e.printStackTrace(); }
     }
 
     public void runAsync(Runnable work) {
         dbExecutor.execute(() -> {
             try { work.run(); } catch (Exception e) {
-                plugin.getLogger().warning("DB async task failed: " + e.getMessage());
-                e.printStackTrace();
+                plugin.getLogger().warning("DB async task failed: " + e.getMessage()); e.printStackTrace();
             }
         });
     }
@@ -86,81 +98,135 @@ public class DatabaseManager {
 
     public void close() {
         runSync(() -> {
-            try {
-                if (connection != null && !connection.isClosed()) connection.close();
-            } catch (SQLException e) { e.printStackTrace(); }
+            try { if (connection != null && !connection.isClosed()) connection.close(); }
+            catch (SQLException e) { e.printStackTrace(); }
         });
         dbExecutor.shutdown();
         try { dbExecutor.awaitTermination(5, TimeUnit.SECONDS); }
         catch (InterruptedException e) { Thread.currentThread().interrupt(); }
     }
 
-    public void pruneOldSnapshots(int days) {
-        runAsync(() -> pruneOldSnapshotsInternal(days));
-    }
+    public void pruneOldSnapshots(int days) { runAsync(() -> pruneOldSnapshotsInternal(days)); }
 
     private void pruneOldSnapshotsInternal(int days) {
         long cutoff = System.currentTimeMillis() - (days * 24L * 60 * 60 * 1000);
-        try (PreparedStatement ps = connection.prepareStatement("DELETE FROM snapshots WHERE timestamp < ?")) {
-            ps.setLong(1, cutoff);
-            int removed = ps.executeUpdate();
-            if (removed > 0) plugin.getLogger().info("Pruned " + removed + " activity snapshots older than " + days + " days.");
+        try {
+            try (PreparedStatement ps = connection.prepareStatement("DELETE FROM snapshot_stats WHERE timestamp < ?")) {
+                ps.setLong(1, cutoff); ps.executeUpdate();
+            }
+            try (PreparedStatement ps = connection.prepareStatement("DELETE FROM snapshots WHERE timestamp < ?")) {
+                ps.setLong(1, cutoff);
+                int removed = ps.executeUpdate();
+                if (removed > 0) plugin.getLogger().info("Pruned " + removed + " activity snapshots older than " + days + " days.");
+            }
         } catch (SQLException e) { e.printStackTrace(); }
     }
 
     public void saveSnapshot(ActivitySnapshot snap) {
         runAsync(() -> {
-            String sql = "INSERT OR REPLACE INTO snapshots (uuid, timestamp, playtime, walk, fly, mob_kills) VALUES (?,?,?,?,?,?)";
-            try (PreparedStatement ps = connection.prepareStatement(sql)) {
-                ps.setString(1, snap.getUuid().toString());
-                ps.setLong(2, snap.getTimestamp());
-                ps.setLong(3, snap.getPlaytime());
-                ps.setLong(4, snap.getWalk());
-                ps.setLong(5, snap.getFly());
-                ps.setLong(6, snap.getMobKills());
-                ps.executeUpdate();
+            try {
+                try (PreparedStatement ps = connection.prepareStatement(
+                        "INSERT OR REPLACE INTO snapshots (uuid, timestamp, playtime, walk, fly, mob_kills) VALUES (?,?,?,?,?,?)")) {
+                    ps.setString(1, snap.getUuid().toString());
+                    ps.setLong(2, snap.getTimestamp());
+                    ps.setLong(3, snap.get("PLAY_ONE_MINUTE"));
+                    ps.setLong(4, snap.get("WALK_ONE_CM"));
+                    ps.setLong(5, snap.get("AVIATE_ONE_CM"));
+                    ps.setLong(6, snap.get("MOB_KILLS"));
+                    ps.executeUpdate();
+                }
+                String sql = "INSERT OR REPLACE INTO snapshot_stats (uuid, timestamp, stat, value) VALUES (?,?,?,?)";
+                try (PreparedStatement ps = connection.prepareStatement(sql)) {
+                    for (var e : snap.getValues().entrySet()) {
+                        ps.setString(1, snap.getUuid().toString());
+                        ps.setLong(2, snap.getTimestamp());
+                        ps.setString(3, e.getKey());
+                        ps.setLong(4, e.getValue());
+                        ps.addBatch();
+                    }
+                    ps.executeBatch();
+                }
             } catch (SQLException e) { e.printStackTrace(); }
         });
     }
 
     public CompletableFuture<List<ActivitySnapshot>> getSnapshotsSinceAsync(UUID uuid, long sinceTimestamp) {
         return supplyAsync(() -> {
-            List<ActivitySnapshot> list = new ArrayList<>();
-            String sql = "SELECT * FROM snapshots WHERE uuid = ? AND timestamp >= ? ORDER BY timestamp ASC";
-            try (PreparedStatement ps = connection.prepareStatement(sql)) {
+            List<Long> times = new ArrayList<>();
+            try (PreparedStatement ps = connection.prepareStatement(
+                    "SELECT DISTINCT timestamp FROM snapshot_stats WHERE uuid = ? AND timestamp >= ? ORDER BY timestamp ASC")) {
                 ps.setString(1, uuid.toString());
                 ps.setLong(2, sinceTimestamp);
                 ResultSet rs = ps.executeQuery();
-                while (rs.next()) {
-                    list.add(new ActivitySnapshot(uuid, rs.getLong("timestamp"), rs.getLong("playtime"), rs.getLong("walk"), rs.getLong("fly"), rs.getLong("mob_kills")));
-                }
+                while (rs.next()) times.add(rs.getLong(1));
             } catch (SQLException e) { e.printStackTrace(); }
+            if (times.isEmpty()) {
+                try (PreparedStatement ps = connection.prepareStatement(
+                        "SELECT timestamp FROM snapshots WHERE uuid = ? AND timestamp >= ? ORDER BY timestamp ASC")) {
+                    ps.setString(1, uuid.toString());
+                    ps.setLong(2, sinceTimestamp);
+                    ResultSet rs = ps.executeQuery();
+                    while (rs.next()) times.add(rs.getLong(1));
+                } catch (SQLException e) { e.printStackTrace(); }
+            }
+            List<ActivitySnapshot> list = new ArrayList<>();
+            for (long ts : times) list.add(loadSnapshotInternal(uuid, ts));
             return list;
         });
     }
 
     public CompletableFuture<ActivitySnapshot> getLatestSnapshotAsync(UUID uuid) {
         return supplyAsync(() -> {
-            String sql = "SELECT * FROM snapshots WHERE uuid = ? ORDER BY timestamp DESC LIMIT 1";
-            try (PreparedStatement ps = connection.prepareStatement(sql)) {
+            Long ts = null;
+            try (PreparedStatement ps = connection.prepareStatement("SELECT MAX(timestamp) FROM snapshot_stats WHERE uuid = ?")) {
                 ps.setString(1, uuid.toString());
                 ResultSet rs = ps.executeQuery();
+                if (rs.next()) { long v = rs.getLong(1); if (!rs.wasNull()) ts = v; }
+            } catch (SQLException e) { e.printStackTrace(); }
+            if (ts == null) {
+                try (PreparedStatement ps = connection.prepareStatement("SELECT MAX(timestamp) FROM snapshots WHERE uuid = ?")) {
+                    ps.setString(1, uuid.toString());
+                    ResultSet rs = ps.executeQuery();
+                    if (rs.next()) { long v = rs.getLong(1); if (!rs.wasNull()) ts = v; }
+                } catch (SQLException e) { e.printStackTrace(); }
+            }
+            if (ts == null) return null;
+            return loadSnapshotInternal(uuid, ts);
+        });
+    }
+
+    private ActivitySnapshot loadSnapshotInternal(UUID uuid, long timestamp) {
+        Map<String, Long> values = new LinkedHashMap<>();
+        try (PreparedStatement ps = connection.prepareStatement(
+                "SELECT stat, value FROM snapshot_stats WHERE uuid = ? AND timestamp = ?")) {
+            ps.setString(1, uuid.toString());
+            ps.setLong(2, timestamp);
+            ResultSet rs = ps.executeQuery();
+            while (rs.next()) values.put(rs.getString("stat"), rs.getLong("value"));
+        } catch (SQLException e) { e.printStackTrace(); }
+        if (values.isEmpty()) {
+            try (PreparedStatement ps = connection.prepareStatement(
+                    "SELECT playtime, walk, fly, mob_kills FROM snapshots WHERE uuid = ? AND timestamp = ?")) {
+                ps.setString(1, uuid.toString());
+                ps.setLong(2, timestamp);
+                ResultSet rs = ps.executeQuery();
                 if (rs.next()) {
-                    return new ActivitySnapshot(uuid, rs.getLong("timestamp"), rs.getLong("playtime"), rs.getLong("walk"), rs.getLong("fly"), rs.getLong("mob_kills"));
+                    values.put("PLAY_ONE_MINUTE", rs.getLong("playtime"));
+                    values.put("WALK_ONE_CM", rs.getLong("walk"));
+                    values.put("AVIATE_ONE_CM", rs.getLong("fly"));
+                    values.put("MOB_KILLS", rs.getLong("mob_kills"));
                 }
             } catch (SQLException e) { e.printStackTrace(); }
-            return null;
-        });
+        }
+        return new ActivitySnapshot(uuid, timestamp, values);
     }
 
     public void upsertPlayerMeta(UUID uuid, String name, long firstJoin, long totalPlaytime) {
         runAsync(() -> {
             String sql = "INSERT INTO player_meta (uuid, name, first_join, total_playtime) VALUES (?, ?, ?, ?) ON CONFLICT(uuid) DO UPDATE SET name = excluded.name, total_playtime = excluded.total_playtime";
             try (PreparedStatement ps = connection.prepareStatement(sql)) {
-                ps.setString(1, uuid.toString());
-                ps.setString(2, name);
-                ps.setLong(3, firstJoin);
-                ps.setLong(4, totalPlaytime);
+                ps.setString(1, uuid.toString()); ps.setString(2, name);
+                ps.setLong(3, firstJoin); ps.setLong(4, totalPlaytime);
                 ps.executeUpdate();
             } catch (SQLException e) { e.printStackTrace(); }
         });
@@ -175,8 +241,7 @@ public class DatabaseManager {
     }
 
     private long getMetaLongInternal(UUID uuid, String column) {
-        String sql = "SELECT " + column + " FROM player_meta WHERE uuid = ?";
-        try (PreparedStatement ps = connection.prepareStatement(sql)) {
+        try (PreparedStatement ps = connection.prepareStatement("SELECT " + column + " FROM player_meta WHERE uuid = ?")) {
             ps.setString(1, uuid.toString());
             ResultSet rs = ps.executeQuery();
             if (rs.next()) return rs.getLong(1);
@@ -198,14 +263,10 @@ public class DatabaseManager {
         runAsync(() -> {
             try (Statement st = connection.createStatement()) { st.execute("DELETE FROM council"); }
             catch (SQLException e) { e.printStackTrace(); return; }
-            String sql = "INSERT INTO council (uuid, name, rank) VALUES (?, ?, ?)";
-            try (PreparedStatement ps = connection.prepareStatement(sql)) {
+            try (PreparedStatement ps = connection.prepareStatement("INSERT INTO council (uuid, name, rank) VALUES (?, ?, ?)")) {
                 int rank = 1;
                 for (Map.Entry<UUID, String> e : members) {
-                    ps.setString(1, e.getKey().toString());
-                    ps.setString(2, e.getValue());
-                    ps.setInt(3, rank++);
-                    ps.addBatch();
+                    ps.setString(1, e.getKey().toString()); ps.setString(2, e.getValue()); ps.setInt(3, rank++); ps.addBatch();
                 }
                 ps.executeBatch();
             } catch (SQLException e) { e.printStackTrace(); }
@@ -225,22 +286,19 @@ public class DatabaseManager {
     public void removeCouncilMember(UUID uuid) {
         runAsync(() -> {
             try (PreparedStatement ps = connection.prepareStatement("DELETE FROM council WHERE uuid = ?")) {
-                ps.setString(1, uuid.toString());
-                ps.executeUpdate();
+                ps.setString(1, uuid.toString()); ps.executeUpdate();
             } catch (SQLException e) { e.printStackTrace(); }
         });
     }
 
     public CompletableFuture<Integer> createProposalAsync(Proposal.Type type, UUID proposer, String target, String value, long expiresAt) {
         return supplyAsync(() -> {
-            String sql = "INSERT INTO proposals (type, proposer, target, value, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)";
-            try (PreparedStatement ps = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
-                ps.setString(1, type.name());
-                ps.setString(2, proposer.toString());
-                ps.setString(3, target);
-                ps.setString(4, value);
-                ps.setLong(5, System.currentTimeMillis());
-                ps.setLong(6, expiresAt);
+            try (PreparedStatement ps = connection.prepareStatement(
+                    "INSERT INTO proposals (type, proposer, target, value, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)",
+                    Statement.RETURN_GENERATED_KEYS)) {
+                ps.setString(1, type.name()); ps.setString(2, proposer.toString());
+                ps.setString(3, target); ps.setString(4, value);
+                ps.setLong(5, System.currentTimeMillis()); ps.setLong(6, expiresAt);
                 ps.executeUpdate();
                 ResultSet keys = ps.getGeneratedKeys();
                 if (keys.next()) return keys.getInt(1);
@@ -251,11 +309,9 @@ public class DatabaseManager {
 
     public void saveVote(int proposalId, UUID voter, boolean yes) {
         runAsync(() -> {
-            String sql = "INSERT OR REPLACE INTO votes (proposal_id, voter, yes) VALUES (?, ?, ?)";
-            try (PreparedStatement ps = connection.prepareStatement(sql)) {
-                ps.setInt(1, proposalId);
-                ps.setString(2, voter.toString());
-                ps.setInt(3, yes ? 1 : 0);
+            try (PreparedStatement ps = connection.prepareStatement(
+                    "INSERT OR REPLACE INTO votes (proposal_id, voter, yes) VALUES (?, ?, ?)")) {
+                ps.setInt(1, proposalId); ps.setString(2, voter.toString()); ps.setInt(3, yes ? 1 : 0);
                 ps.executeUpdate();
             } catch (SQLException e) { e.printStackTrace(); }
         });
@@ -266,11 +322,8 @@ public class DatabaseManager {
 
     private void updateProposalFlag(int id, String column, int value) {
         runAsync(() -> {
-            String sql = "UPDATE proposals SET " + column + " = ? WHERE id = ?";
-            try (PreparedStatement ps = connection.prepareStatement(sql)) {
-                ps.setInt(1, value);
-                ps.setInt(2, id);
-                ps.executeUpdate();
+            try (PreparedStatement ps = connection.prepareStatement("UPDATE proposals SET " + column + " = ? WHERE id = ?")) {
+                ps.setInt(1, value); ps.setInt(2, id); ps.executeUpdate();
             } catch (SQLException e) { e.printStackTrace(); }
         });
     }
@@ -278,15 +331,11 @@ public class DatabaseManager {
     public CompletableFuture<List<Proposal>> getActiveProposalsAsync() {
         return supplyAsync(() -> {
             List<Proposal> list = new ArrayList<>();
-            String sql = "SELECT * FROM proposals WHERE cancelled = 0 AND executed = 0 AND expires_at > ?";
-            try (PreparedStatement ps = connection.prepareStatement(sql)) {
+            try (PreparedStatement ps = connection.prepareStatement(
+                    "SELECT * FROM proposals WHERE cancelled = 0 AND executed = 0 AND expires_at > ?")) {
                 ps.setLong(1, System.currentTimeMillis());
                 ResultSet rs = ps.executeQuery();
-                while (rs.next()) {
-                    Proposal p = rowToProposal(rs);
-                    loadVotesInternal(p);
-                    list.add(p);
-                }
+                while (rs.next()) { Proposal p = rowToProposal(rs); loadVotesInternal(p); list.add(p); }
             } catch (SQLException e) { e.printStackTrace(); }
             return list;
         });
@@ -294,30 +343,26 @@ public class DatabaseManager {
 
     public CompletableFuture<Proposal> getProposalAsync(int id) {
         return supplyAsync(() -> {
-            String sql = "SELECT * FROM proposals WHERE id = ?";
-            try (PreparedStatement ps = connection.prepareStatement(sql)) {
+            try (PreparedStatement ps = connection.prepareStatement("SELECT * FROM proposals WHERE id = ?")) {
                 ps.setInt(1, id);
                 ResultSet rs = ps.executeQuery();
-                if (rs.next()) {
-                    Proposal p = rowToProposal(rs);
-                    loadVotesInternal(p);
-                    return p;
-                }
+                if (rs.next()) { Proposal p = rowToProposal(rs); loadVotesInternal(p); return p; }
             } catch (SQLException e) { e.printStackTrace(); }
             return null;
         });
     }
 
     private Proposal rowToProposal(ResultSet rs) throws SQLException {
-        Proposal p = new Proposal(rs.getInt("id"), Proposal.Type.valueOf(rs.getString("type")), UUID.fromString(rs.getString("proposer")), rs.getString("target"), rs.getString("value"), rs.getLong("created_at"), rs.getLong("expires_at"));
+        Proposal p = new Proposal(rs.getInt("id"), Proposal.Type.valueOf(rs.getString("type")),
+                UUID.fromString(rs.getString("proposer")), rs.getString("target"), rs.getString("value"),
+                rs.getLong("created_at"), rs.getLong("expires_at"));
         p.setCancelled(rs.getInt("cancelled") == 1);
         p.setExecuted(rs.getInt("executed") == 1);
         return p;
     }
 
     private void loadVotesInternal(Proposal p) {
-        String sql = "SELECT voter, yes FROM votes WHERE proposal_id = ?";
-        try (PreparedStatement ps = connection.prepareStatement(sql)) {
+        try (PreparedStatement ps = connection.prepareStatement("SELECT voter, yes FROM votes WHERE proposal_id = ?")) {
             ps.setInt(1, p.getId());
             ResultSet rs = ps.executeQuery();
             while (rs.next()) p.addVote(UUID.fromString(rs.getString("voter")), rs.getInt("yes") == 1);
@@ -326,11 +371,8 @@ public class DatabaseManager {
 
     public void log(String message) {
         runAsync(() -> {
-            String sql = "INSERT INTO audit_log (timestamp, message) VALUES (?, ?)";
-            try (PreparedStatement ps = connection.prepareStatement(sql)) {
-                ps.setLong(1, System.currentTimeMillis());
-                ps.setString(2, message);
-                ps.executeUpdate();
+            try (PreparedStatement ps = connection.prepareStatement("INSERT INTO audit_log (timestamp, message) VALUES (?, ?)")) {
+                ps.setLong(1, System.currentTimeMillis()); ps.setString(2, message); ps.executeUpdate();
             } catch (SQLException e) { e.printStackTrace(); }
         });
     }
@@ -338,8 +380,7 @@ public class DatabaseManager {
     public CompletableFuture<List<String>> getRecentAuditAsync(int limit) {
         return supplyAsync(() -> {
             List<String> list = new ArrayList<>();
-            String sql = "SELECT message FROM audit_log ORDER BY id DESC LIMIT ?";
-            try (PreparedStatement ps = connection.prepareStatement(sql)) {
+            try (PreparedStatement ps = connection.prepareStatement("SELECT message FROM audit_log ORDER BY id DESC LIMIT ?")) {
                 ps.setInt(1, limit);
                 ResultSet rs = ps.executeQuery();
                 while (rs.next()) list.add(rs.getString("message"));
@@ -350,11 +391,9 @@ public class DatabaseManager {
 
     public void setPendingPluginAction(String pluginName, boolean enable) {
         runAsync(() -> {
-            String sql = "INSERT OR REPLACE INTO pending_plugin_actions (plugin_name, enable) VALUES (?, ?)";
-            try (PreparedStatement ps = connection.prepareStatement(sql)) {
-                ps.setString(1, pluginName);
-                ps.setInt(2, enable ? 1 : 0);
-                ps.executeUpdate();
+            try (PreparedStatement ps = connection.prepareStatement(
+                    "INSERT OR REPLACE INTO pending_plugin_actions (plugin_name, enable) VALUES (?, ?)")) {
+                ps.setString(1, pluginName); ps.setInt(2, enable ? 1 : 0); ps.executeUpdate();
             } catch (SQLException e) { e.printStackTrace(); }
         });
     }
@@ -362,7 +401,8 @@ public class DatabaseManager {
     public Map<String, Boolean> getPendingPluginActionsSync() {
         Map<String, Boolean> map = new ConcurrentHashMap<>();
         runSync(() -> {
-            try (Statement st = connection.createStatement(); ResultSet rs = st.executeQuery("SELECT plugin_name, enable FROM pending_plugin_actions")) {
+            try (Statement st = connection.createStatement();
+                 ResultSet rs = st.executeQuery("SELECT plugin_name, enable FROM pending_plugin_actions")) {
                 while (rs.next()) map.put(rs.getString("plugin_name"), rs.getInt("enable") == 1);
             } catch (SQLException e) { e.printStackTrace(); }
         });
@@ -378,8 +418,7 @@ public class DatabaseManager {
 
     public CompletableFuture<Integer> getBanLadderStageAsync(UUID uuid) {
         return supplyAsync(() -> {
-            String sql = "SELECT stage FROM ban_ladder WHERE uuid = ?";
-            try (PreparedStatement ps = connection.prepareStatement(sql)) {
+            try (PreparedStatement ps = connection.prepareStatement("SELECT stage FROM ban_ladder WHERE uuid = ?")) {
                 ps.setString(1, uuid.toString());
                 ResultSet rs = ps.executeQuery();
                 if (rs.next()) return rs.getInt("stage");
@@ -390,12 +429,9 @@ public class DatabaseManager {
 
     public void setBanLadderStage(UUID uuid, String name, int stage) {
         runAsync(() -> {
-            String sql = "INSERT INTO ban_ladder (uuid, name, stage) VALUES (?, ?, ?) ON CONFLICT(uuid) DO UPDATE SET name = excluded.name, stage = excluded.stage";
-            try (PreparedStatement ps = connection.prepareStatement(sql)) {
-                ps.setString(1, uuid.toString());
-                ps.setString(2, name);
-                ps.setInt(3, stage);
-                ps.executeUpdate();
+            try (PreparedStatement ps = connection.prepareStatement(
+                    "INSERT INTO ban_ladder (uuid, name, stage) VALUES (?, ?, ?) ON CONFLICT(uuid) DO UPDATE SET name = excluded.name, stage = excluded.stage")) {
+                ps.setString(1, uuid.toString()); ps.setString(2, name); ps.setInt(3, stage); ps.executeUpdate();
             } catch (SQLException e) { e.printStackTrace(); }
         });
     }
