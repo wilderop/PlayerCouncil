@@ -6,9 +6,14 @@ import org.bukkit.entity.Player;
 
 import java.util.*;
 
+/**
+ * Loads which vanilla statistics are tracked for activity scoring.
+ * Only UNTYPED statistics are supported (no per-block / per-entity args).
+ */
 public class TrackedStats {
 
     public record Definition(String name, Statistic statistic, double weight, double scale) {
+        /** score contribution = weight * (delta / scale) */
         public double contribution(long delta) {
             if (scale <= 0) return 0;
             return weight * (Math.max(0, delta) / scale);
@@ -42,6 +47,7 @@ public class TrackedStats {
                 loaded.add(new Definition(stat.name(), stat, weight, scale));
             }
         }
+
         if (loaded.isEmpty()) {
             loaded.add(def(Statistic.PLAY_ONE_MINUTE, 1.0, 72_000.0));
             loaded.add(def(Statistic.WALK_ONE_CM, 1.0, 100_000.0));
@@ -73,7 +79,9 @@ public class TrackedStats {
     public static Statistic resolve(String name) {
         try {
             Statistic s = Statistic.valueOf(name.toUpperCase(Locale.ROOT));
-            if (s.getType() != Statistic.Type.UNTYPED) return null;
+            if (s.getType() != Statistic.Type.UNTYPED) {
+                return null;
+            }
             return s;
         } catch (IllegalArgumentException e) {
             return null;
@@ -145,7 +153,10 @@ public class TrackedStats {
         List<Definition> next = new ArrayList<>();
         boolean removed = false;
         for (Definition d : definitions) {
-            if (d.name().equals(key)) { removed = true; continue; }
+            if (d.name().equals(key)) {
+                removed = true;
+                continue;
+            }
             next.add(d);
         }
         if (!removed) return false;
@@ -171,7 +182,8 @@ public class TrackedStats {
             if (d.name().equals(key)) {
                 found = true;
                 next.add(new Definition(
-                        d.name(), d.statistic(),
+                        d.name(),
+                        d.statistic(),
                         weight != null ? weight : d.weight(),
                         scale != null && scale > 0 ? scale : d.scale()
                 ));
