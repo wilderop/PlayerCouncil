@@ -23,23 +23,12 @@ public class ActivityManager {
                         ActivitySnapshot last = snaps.get(snaps.size() - 1);
                         return CompletableFuture.completedFuture(score(last.subtract(first)));
                     }
-                    return plugin.getDatabaseManager().getLatestSnapshotAsync(uuid)
-                            .thenApply(latest -> {
-                                if (latest == null) return 0.0;
-                                return score(new ActivityDelta(
-                                        latest.getPlaytime(), latest.getWalk(),
-                                        latest.getFly(), latest.getMobKills()));
-                            });
+                    return CompletableFuture.completedFuture(0.0);
                 });
     }
 
     private double score(ActivityDelta delta) {
-        var cfg = plugin.getConfig().getConfigurationSection("activity.weights");
-        double wPlay = cfg != null ? cfg.getDouble("playtime", 1.0) : 1.0;
-        double wWalk = cfg != null ? cfg.getDouble("walk", 1.0) : 1.0;
-        double wFly = cfg != null ? cfg.getDouble("fly", 1.0) : 1.0;
-        double wMob = cfg != null ? cfg.getDouble("mob_kills", 1.0) : 1.0;
-        return delta.score(wPlay, wWalk, wFly, wMob);
+        return plugin.getTrackedStats().score(delta.getDeltas());
     }
 
     public CompletableFuture<List<Map.Entry<UUID, Double>>> getRankedPlayersAsync(long sinceMs, int minHours) {
@@ -55,7 +44,7 @@ public class ActivityManager {
                                 return CompletableFuture.completedFuture(null);
                             }
                             return getActivityScoreAsync(uuid, sinceMs)
-                                    .thenApply(score -> new AbstractMap.SimpleEntry<>(uuid, score));
+                                    .thenApply(s -> new AbstractMap.SimpleEntry<>(uuid, s));
                         });
                 futures.add(f);
             }
@@ -70,7 +59,7 @@ public class ActivityManager {
                         ranked.sort((a, b) -> Double.compare(b.getValue(), a.getValue()));
                         return ranked;
                     })
-                    .thenCompose(ranked -> applyTiebreakersAsync(ranked));
+                    .thenCompose(this::applyTiebreakersAsync);
         });
     }
 

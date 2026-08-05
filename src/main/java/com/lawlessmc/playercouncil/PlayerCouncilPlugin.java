@@ -5,6 +5,7 @@ import com.lawlessmc.playercouncil.listeners.PlayerListener;
 import com.lawlessmc.playercouncil.managers.*;
 import com.lawlessmc.playercouncil.storage.DatabaseManager;
 import com.lawlessmc.playercouncil.util.DiscordWebhook;
+import com.lawlessmc.playercouncil.util.TrackedStats;
 import org.bukkit.plugin.java.JavaPlugin;
 
 public class PlayerCouncilPlugin extends JavaPlugin {
@@ -17,6 +18,7 @@ public class PlayerCouncilPlugin extends JavaPlugin {
     private ProposalManager proposalManager;
     private BanVoteManager banVoteManager;
     private DiscordWebhook discordWebhook;
+    private TrackedStats trackedStats;
 
     @Override
     public void onEnable() {
@@ -31,6 +33,7 @@ public class PlayerCouncilPlugin extends JavaPlugin {
         this.proposalManager = new ProposalManager(this);
         this.banVoteManager = new BanVoteManager(this);
         this.discordWebhook = new DiscordWebhook(this);
+        this.trackedStats = new TrackedStats(this);
 
         registerCommands();
         getServer().getPluginManager().registerEvents(new PlayerListener(this), this);
@@ -96,5 +99,9 @@ public class PlayerCouncilPlugin extends JavaPlugin {
 
     public DiscordWebhook getDiscordWebhook() {
         return discordWebhook;
+    }
+
+    public TrackedStats getTrackedStats() {
+        return trackedStats;
     }
 }
