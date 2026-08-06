@@ -55,7 +55,21 @@ public class ProposeCommand implements CommandExecutor {
                 player.sendMessage(mm.deserialize("<red>No pending proposal to confirm."));
                 return true;
             }
-            plugin.getProposalManager().createProposal(player, p.type, p.target, p.value);
+            if (p.type() == Proposal.Type.BAN || p.type() == Proposal.Type.REBAN) {
+                plugin.getDatabaseManager().getBanProposeCooldownAsync(player.getUniqueId()).thenAccept(until ->
+                        plugin.getServer().getScheduler().runTask(plugin, () -> {
+                            if (until > System.currentTimeMillis()) {
+                                long leftH = (until - System.currentTimeMillis()) / (1000L * 60L * 60L);
+                                player.sendMessage(mm.deserialize(
+                                        "<red>You cannot propose bans for another <yellow>" + leftH
+                                                + "</yellow> hour(s) (cooldown after your ban was overturned)."));
+                                return;
+                            }
+                            plugin.getProposalManager().createProposal(player, p.type(), p.target(), p.value());
+                        }));
+                return true;
+            }
+            plugin.getProposalManager().createProposal(player, p.type(), p.target(), p.value());
             return true;
         }
 
@@ -74,23 +88,23 @@ public class ProposeCommand implements CommandExecutor {
             }
             boolean wantBan = action.equals("ban");
             String targetName = args[1];
-            player.sendMessage(mm.deserialize("<gray>Resolving ban ladder for <white>" + targetName + "</white>..."));
 
-            plugin.getBanVoteManager().resolveLadder(targetName, wantBan).thenAccept(res ->
-                    plugin.getServer().getScheduler().runTask(plugin, () -> {
-                        if (res.type() == null) {
-                            player.sendMessage(mm.deserialize("<red>" + res.explanation()));
-                            return;
-                        }
-                        pending.put(player.getUniqueId(), new Pending(res.type(), res.targetName(), null));
-                        player.sendMessage(mm.deserialize("<gold>Confirm proposal:</gold>"));
-                        player.sendMessage(mm.deserialize("  <white>" + res.type().name() + " → " + res.targetName()));
-                        player.sendMessage(mm.deserialize("  <gray>" + res.explanation()));
-                        player.sendMessage(mm.deserialize("  <yellow>Needs <white>" + res.requiredVotes()
-                                + "</white> yes votes to pass."));
-                        player.sendMessage(mm.deserialize(
-                                "<yellow>Type <white>/propose confirm</white> to submit, or <white>/propose cancel</white> to abort."));
-                    }));
+            if (wantBan) {
+                plugin.getDatabaseManager().getBanProposeCooldownAsync(player.getUniqueId()).thenAccept(until ->
+                        plugin.getServer().getScheduler().runTask(plugin, () -> {
+                            if (until > System.currentTimeMillis()) {
+                                long leftH = (until - System.currentTimeMillis()) / (1000L * 60L * 60L);
+                                player.sendMessage(mm.deserialize(
+                                        "<red>You cannot propose bans for another <yellow>" + leftH
+                                                + "</yellow> hour(s) (cooldown after your ban was overturned)."));
+                                return;
+                            }
+                            startBanLadder(player, targetName, true);
+                        }));
+                return true;
+            }
+
+            startBanLadder(player, targetName, false);
             return true;
         }
 
@@ -109,19 +123,21 @@ public class ProposeCommand implements CommandExecutor {
                 return true;
             }
             boolean wantBan = (type == Proposal.Type.BAN || type == Proposal.Type.REBAN);
-            plugin.getBanVoteManager().resolveLadder(args[1], wantBan).thenAccept(res ->
-                    plugin.getServer().getScheduler().runTask(plugin, () -> {
-                        if (res.type() == null) {
-                            player.sendMessage(mm.deserialize("<red>" + res.explanation()));
-                            return;
-                        }
-                        pending.put(player.getUniqueId(), new Pending(res.type(), res.targetName(), null));
-                        player.sendMessage(mm.deserialize("<gold>Confirm (auto ladder):</gold> <white>"
-                                + res.type().name() + " → " + res.targetName()));
-                        player.sendMessage(mm.deserialize("<gray>" + res.explanation()));
-                        player.sendMessage(mm.deserialize(
-                                "<yellow>/propose confirm</white> or <white>/propose cancel"));
-                    }));
+            if (wantBan) {
+                plugin.getDatabaseManager().getBanProposeCooldownAsync(player.getUniqueId()).thenAccept(until ->
+                        plugin.getServer().getScheduler().runTask(plugin, () -> {
+                            if (until > System.currentTimeMillis()) {
+                                long leftH = (until - System.currentTimeMillis()) / (1000L * 60L * 60L);
+                                player.sendMessage(mm.deserialize(
+                                        "<red>You cannot propose bans for another <yellow>" + leftH
+                                                + "</yellow> hour(s)."));
+                                return;
+                            }
+                            startBanLadder(player, args[1], true);
+                        }));
+                return true;
+            }
+            startBanLadder(player, args[1], false);
             return true;
         }
 
@@ -164,6 +180,25 @@ public class ProposeCommand implements CommandExecutor {
         player.sendMessage(mm.deserialize(
                 "<yellow>Type <white>/propose confirm</white> to submit, or <white>/propose cancel</white> to abort."));
         return true;
+    }
+
+    private void startBanLadder(Player player, String targetName, boolean wantBan) {
+        player.sendMessage(mm.deserialize("<gray>Resolving ban ladder for <white>" + targetName + "</white>..."));
+        plugin.getBanVoteManager().resolveLadder(targetName, wantBan).thenAccept(res ->
+                plugin.getServer().getScheduler().runTask(plugin, () -> {
+                    if (res.type() == null) {
+                        player.sendMessage(mm.deserialize("<red>" + res.explanation()));
+                        return;
+                    }
+                    pending.put(player.getUniqueId(), new Pending(res.type(), res.targetName(), null));
+                    player.sendMessage(mm.deserialize("<gold>Confirm proposal:</gold>"));
+                    player.sendMessage(mm.deserialize("  <white>" + res.type().name() + " → " + res.targetName()));
+                    player.sendMessage(mm.deserialize("  <gray>" + res.explanation()));
+                    player.sendMessage(mm.deserialize("  <yellow>Needs <white>" + res.requiredVotes()
+                            + "</white> yes votes to pass."));
+                    player.sendMessage(mm.deserialize(
+                            "<yellow>Type <white>/propose confirm</white> to submit, or <white>/propose cancel</white> to abort."));
+                }));
     }
 
     private void sendUsage(Player player) {
