@@ -46,55 +46,94 @@ public class CouncilAdminCommand implements CommandExecutor {
                 sender.sendMessage(mm.deserialize("<green>Council recalculation started (async)."));
             }
             case "setsize" -> {
-                if (args.length < 2) { sender.sendMessage(mm.deserialize("<red>Usage: /counciladmin setsize <n>")); return true; }
+                if (args.length < 2) {
+                    sender.sendMessage(mm.deserialize("<red>Usage: /counciladmin setsize <n>"));
+                    return true;
+                }
                 try {
                     int size = Integer.parseInt(args[1]);
                     plugin.getConfig().set("council.size", size);
                     plugin.saveConfig();
                     sender.sendMessage(mm.deserialize("<green>Council size set to " + size + ". Run /counciladmin recalc to apply."));
-                } catch (NumberFormatException e) { sender.sendMessage(mm.deserialize("<red>Invalid number.")); }
+                } catch (NumberFormatException e) {
+                    sender.sendMessage(mm.deserialize("<red>Invalid number."));
+                }
             }
             case "sethours" -> {
-                if (args.length < 2) { sender.sendMessage(mm.deserialize("<red>Usage: /counciladmin sethours <n>")); return true; }
+                if (args.length < 2) {
+                    sender.sendMessage(mm.deserialize("<red>Usage: /counciladmin sethours <n>"));
+                    return true;
+                }
                 try {
                     int hours = Integer.parseInt(args[1]);
-                    if (hours < 0) { sender.sendMessage(mm.deserialize("<red>Hours cannot be negative.")); return true; }
+                    if (hours < 0) {
+                        sender.sendMessage(mm.deserialize("<red>Hours cannot be negative."));
+                        return true;
+                    }
                     plugin.getConfig().set("council.min-total-hours", hours);
                     plugin.saveConfig();
                     sender.sendMessage(mm.deserialize("<green>Minimum total hours set to " + hours + ". Run /counciladmin recalc to apply."));
-                } catch (NumberFormatException e) { sender.sendMessage(mm.deserialize("<red>Invalid number.")); }
+                } catch (NumberFormatException e) {
+                    sender.sendMessage(mm.deserialize("<red>Invalid number."));
+                }
             }
             case "setmin" -> {
-                if (args.length < 2) { sender.sendMessage(mm.deserialize("<red>Usage: /counciladmin setmin <n>")); return true; }
+                if (args.length < 2) {
+                    sender.sendMessage(mm.deserialize("<red>Usage: /counciladmin setmin <n>"));
+                    return true;
+                }
                 try {
                     int min = Integer.parseInt(args[1]);
-                    if (min < 1) { sender.sendMessage(mm.deserialize("<red>Minimum must be at least 1.")); return true; }
+                    if (min < 1) {
+                        sender.sendMessage(mm.deserialize("<red>Minimum must be at least 1."));
+                        return true;
+                    }
                     plugin.getConfig().set("council.min-active-members", min);
                     plugin.saveConfig();
                     sender.sendMessage(mm.deserialize("<green>Minimum active members set to " + min + "."));
                     boolean active = plugin.getCouncilManager().isSystemActive();
-                    sender.sendMessage(mm.deserialize(active ? "<green>Voting system is now ACTIVE." : "<yellow>Voting system is still INACTIVE (not enough members yet)."));
-                } catch (NumberFormatException e) { sender.sendMessage(mm.deserialize("<red>Invalid number.")); }
+                    sender.sendMessage(mm.deserialize(active
+                            ? "<green>Voting system is now ACTIVE."
+                            : "<yellow>Voting system is still INACTIVE (not enough members yet)."));
+                } catch (NumberFormatException e) {
+                    sender.sendMessage(mm.deserialize("<red>Invalid number."));
+                }
             }
             case "whitelist" -> {
-                if (args.length < 2) { sender.sendMessage(mm.deserialize("<red>Usage: /counciladmin whitelist <add|remove|list> [plugin]")); return true; }
+                if (args.length < 2) {
+                    sender.sendMessage(mm.deserialize("<red>Usage: /counciladmin whitelist <add|remove|list> [plugin]"));
+                    return true;
+                }
                 List<String> list = plugin.getConfig().getStringList("plugins.whitelist");
                 switch (args[1].toLowerCase()) {
                     case "list" -> {
-                        if (list.isEmpty()) sender.sendMessage(mm.deserialize("<gray>Whitelist is empty."));
-                        else {
+                        if (list.isEmpty()) {
+                            sender.sendMessage(mm.deserialize("<gray>Whitelist is empty."));
+                        } else {
                             sender.sendMessage(mm.deserialize("<gold>Whitelisted plugins:"));
-                            for (String s : list) sender.sendMessage(mm.deserialize("  <white>" + s));
+                            for (String s : list) {
+                                sender.sendMessage(mm.deserialize("  <white>" + s));
+                            }
                         }
                     }
                     case "add" -> {
-                        if (args.length < 3) { sender.sendMessage(mm.deserialize("<red>Usage: /counciladmin whitelist add <plugin>")); return true; }
+                        if (args.length < 3) {
+                            sender.sendMessage(mm.deserialize("<red>Usage: /counciladmin whitelist add <plugin>"));
+                            return true;
+                        }
                         String name = args[2];
-                        if (!list.contains(name)) { list.add(name); plugin.getConfig().set("plugins.whitelist", list); plugin.saveConfig(); }
+                        if (!list.contains(name)) {
+                            list.add(name);
+                            plugin.getConfig().set("plugins.whitelist", list);
+                            plugin.saveConfig();
+                        }
                         sender.sendMessage(mm.deserialize("<green>Added " + name + " to whitelist."));
                     }
                     case "remove" -> {
-                        if (args.length < 3) { sender.sendMessage(mm.deserialize("<red>Usage: /counciladmin whitelist remove <plugin>")); return true; }
+                        if (args.length < 3) {
+                            sender.sendMessage(mm.deserialize("<red>Usage: /counciladmin whitelist remove <plugin>"));
+                            return true;
+                        }
                         String name = args[2];
                         list.removeIf(s -> s.equalsIgnoreCase(name));
                         plugin.getConfig().set("plugins.whitelist", list);
@@ -107,11 +146,16 @@ public class CouncilAdminCommand implements CommandExecutor {
             case "stat", "stats" -> handleStat(sender, args);
             case "audit" -> {
                 int limit = 20;
-                if (args.length >= 2) { try { limit = Integer.parseInt(args[1]); } catch (NumberFormatException ignored) {} }
-                plugin.getDatabaseManager().getRecentAuditAsync(limit).thenAccept(logs ->
+                if (args.length >= 2) {
+                    try { limit = Integer.parseInt(args[1]); } catch (NumberFormatException ignored) {}
+                }
+                final int auditLimit = limit;
+                plugin.getDatabaseManager().getRecentAuditAsync(auditLimit).thenAccept(logs ->
                         plugin.getServer().getScheduler().runTask(plugin, () -> {
-                            sender.sendMessage(mm.deserialize("<gold>===== Audit Log (last " + limit + ") ====="));
-                            for (String line : logs) sender.sendMessage(mm.deserialize("<gray>" + line));
+                            sender.sendMessage(mm.deserialize("<gold>===== Audit Log (last " + auditLimit + ") ====="));
+                            for (String line : logs) {
+                                sender.sendMessage(mm.deserialize("<gray>" + line));
+                            }
                         }));
             }
             default -> sender.sendMessage(mm.deserialize("<red>Unknown subcommand."));
@@ -129,25 +173,30 @@ public class CouncilAdminCommand implements CommandExecutor {
             case "list" -> {
                 sender.sendMessage(mm.deserialize("<gold>Tracked activity statistics:"));
                 for (var d : tracked.getDefinitions()) {
-                    sender.sendMessage(mm.deserialize("  <white>" + d.name() + " <gray>weight=<aqua>" + d.weight() + " <gray>scale=<aqua>" + d.scale()));
+                    sender.sendMessage(mm.deserialize(
+                            "  <white>" + d.name()
+                                    + " <gray>weight=<aqua>" + d.weight()
+                                    + " <gray>scale=<aqua>" + d.scale()));
                 }
             }
             case "add" -> {
                 if (args.length < 3) {
                     sender.sendMessage(mm.deserialize("<red>Usage: /counciladmin stat add <STATISTIC> [weight] [scale]"));
-                    sender.sendMessage(mm.deserialize("<gray>Only UNTYPED stats work (e.g. DEATHS, PLAYER_KILLS, JUMP)."));
+                    sender.sendMessage(mm.deserialize("<gray>Only UNTYPED stats work (e.g. DEATHS, PLAYER_KILLS, JUMP, TIME_SINCE_REST)."));
                     return;
                 }
                 double weight = 1.0;
                 double scale = -1;
                 if (args.length >= 4) {
                     try { weight = Double.parseDouble(args[3]); } catch (NumberFormatException e) {
-                        sender.sendMessage(mm.deserialize("<red>Invalid weight.")); return;
+                        sender.sendMessage(mm.deserialize("<red>Invalid weight."));
+                        return;
                     }
                 }
                 if (args.length >= 5) {
                     try { scale = Double.parseDouble(args[4]); } catch (NumberFormatException e) {
-                        sender.sendMessage(mm.deserialize("<red>Invalid scale.")); return;
+                        sender.sendMessage(mm.deserialize("<red>Invalid scale."));
+                        return;
                     }
                 }
                 if (!tracked.add(args[2], weight, scale)) {
@@ -155,21 +204,32 @@ public class CouncilAdminCommand implements CommandExecutor {
                     return;
                 }
                 sender.sendMessage(mm.deserialize("<green>Added tracked stat <white>" + args[2].toUpperCase()
-                        + "</white>. New snapshots will include it after join/quit pairs."));
+                        + "</white>. New snapshots will include it; ranking uses deltas after the next join/quit pairs."));
             }
             case "remove" -> {
-                if (args.length < 3) { sender.sendMessage(mm.deserialize("<red>Usage: /counciladmin stat remove <STATISTIC>")); return; }
-                if (!tracked.remove(args[2])) { sender.sendMessage(mm.deserialize("<red>Stat not in tracked list.")); return; }
+                if (args.length < 3) {
+                    sender.sendMessage(mm.deserialize("<red>Usage: /counciladmin stat remove <STATISTIC>"));
+                    return;
+                }
+                if (!tracked.remove(args[2])) {
+                    sender.sendMessage(mm.deserialize("<red>Stat not in tracked list."));
+                    return;
+                }
                 sender.sendMessage(mm.deserialize("<green>Removed tracked stat <white>" + args[2].toUpperCase()));
             }
             case "setweight" -> {
-                if (args.length < 4) { sender.sendMessage(mm.deserialize("<red>Usage: /counciladmin stat setweight <STATISTIC> <weight>")); return; }
+                if (args.length < 4) {
+                    sender.sendMessage(mm.deserialize("<red>Usage: /counciladmin stat setweight <STATISTIC> <weight>"));
+                    return;
+                }
                 double weight;
                 try { weight = Double.parseDouble(args[3]); } catch (NumberFormatException e) {
-                    sender.sendMessage(mm.deserialize("<red>Invalid weight.")); return;
+                    sender.sendMessage(mm.deserialize("<red>Invalid weight."));
+                    return;
                 }
                 if (!tracked.setWeight(args[2], weight)) {
-                    sender.sendMessage(mm.deserialize("<red>Stat not in tracked list. Add it first.")); return;
+                    sender.sendMessage(mm.deserialize("<red>Stat not in tracked list. Add it first."));
+                    return;
                 }
                 sender.sendMessage(mm.deserialize("<green>Updated weight for <white>" + args[2].toUpperCase()));
             }
@@ -181,11 +241,16 @@ public class CouncilAdminCommand implements CommandExecutor {
                 }
                 double scale;
                 try { scale = Double.parseDouble(args[3]); } catch (NumberFormatException e) {
-                    sender.sendMessage(mm.deserialize("<red>Invalid scale.")); return;
+                    sender.sendMessage(mm.deserialize("<red>Invalid scale."));
+                    return;
                 }
-                if (scale <= 0) { sender.sendMessage(mm.deserialize("<red>Scale must be positive.")); return; }
+                if (scale <= 0) {
+                    sender.sendMessage(mm.deserialize("<red>Scale must be positive."));
+                    return;
+                }
                 if (!tracked.setScale(args[2], scale)) {
-                    sender.sendMessage(mm.deserialize("<red>Stat not in tracked list. Add it first.")); return;
+                    sender.sendMessage(mm.deserialize("<red>Stat not in tracked list. Add it first."));
+                    return;
                 }
                 sender.sendMessage(mm.deserialize("<green>Updated scale for <white>" + args[2].toUpperCase()));
             }
