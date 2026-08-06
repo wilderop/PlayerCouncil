@@ -23,7 +23,12 @@ activity:
       scale: 1
 
 voting:
-  ban: 1
+  # First ban of a NEW player (< veteran-hours): this many yes votes
+  ban-new: 1
+  # First ban of a VETERAN (>= veteran-hours): this many yes votes
+  ban-veteran: 2
+  # Total hours that separates new vs veteran for ban threshold
+  veteran-hours: 100
   pardon: 2
   reban: 4
   repardon: 8
@@ -31,8 +36,15 @@ voting:
   plugin: 8
   proposal-timeout-days: 7
   restart-warning-minutes: 10
-  # After a ban on you is overturned, you cannot propose bans for this many days
   ban-cooldown-days: 7
+
+# How council ban/unban commands are executed
+ban:
+  # smartban = incremental SmartBan plugin | vanilla = Minecraft /ban /pardon
+  provider: smartban
+  ban-command: "ban {player} {reason}"
+  # SmartBan requires a reason on unban
+  unban-command: "unban {player} {reason}"
 
 discord:
   webhook-url: ""

@@ -5,6 +5,7 @@ api-version: '1.21'
 authors: [wilderop]
 description: Activity-based Player Council with voting for bans, gamerules, and plugins
 website: https://github.com/wilderop/PlayerCouncil
+softdepend: [SmartBan]
 
 commands:
   council:
