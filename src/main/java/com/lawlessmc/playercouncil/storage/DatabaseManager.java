@@ -407,8 +407,9 @@ public class DatabaseManager {
             try (Statement st = connection.createStatement();
                  ResultSet rs = st.executeQuery("SELECT plugin_name, enable FROM pending_plugin_actions")) {
                 while (rs.next()) map.put(rs.getString("plugin_name"), rs.getInt("enable") == 1);
-            } catch (SQLException e) { e.printStackTrace(); }
-            return map;
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         });
         return map;
     }
