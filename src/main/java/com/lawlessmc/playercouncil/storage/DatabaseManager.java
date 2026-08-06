@@ -55,6 +55,7 @@ public class DatabaseManager {
             st.execute("CREATE TABLE IF NOT EXISTS pending_plugin_actions (plugin_name TEXT PRIMARY KEY, enable INTEGER NOT NULL)");
             st.execute("CREATE TABLE IF NOT EXISTS ban_ladder (uuid TEXT PRIMARY KEY, name TEXT, stage INTEGER NOT NULL DEFAULT 0)");
             st.execute("CREATE TABLE IF NOT EXISTS snapshot_stats (uuid TEXT NOT NULL, timestamp INTEGER NOT NULL, stat TEXT NOT NULL, value INTEGER NOT NULL, PRIMARY KEY (uuid, timestamp, stat))");
+            st.execute("CREATE TABLE IF NOT EXISTS ban_propose_cooldown (uuid TEXT PRIMARY KEY, until_ms INTEGER NOT NULL)");
             migrateLegacySnapshots(st);
         }
     }
@@ -432,6 +433,39 @@ public class DatabaseManager {
             try (PreparedStatement ps = connection.prepareStatement(
                     "INSERT INTO ban_ladder (uuid, name, stage) VALUES (?, ?, ?) ON CONFLICT(uuid) DO UPDATE SET name = excluded.name, stage = excluded.stage")) {
                 ps.setString(1, uuid.toString()); ps.setString(2, name); ps.setInt(3, stage); ps.executeUpdate();
+            } catch (SQLException e) { e.printStackTrace(); }
+        });
+    }
+
+    public void setBanProposeCooldown(UUID uuid, long untilMs) {
+        runAsync(() -> {
+            try (PreparedStatement ps = connection.prepareStatement(
+                    "INSERT INTO ban_propose_cooldown (uuid, until_ms) VALUES (?, ?) ON CONFLICT(uuid) DO UPDATE SET until_ms = excluded.until_ms")) {
+                ps.setString(1, uuid.toString());
+                ps.setLong(2, untilMs);
+                ps.executeUpdate();
+            } catch (SQLException e) { e.printStackTrace(); }
+        });
+    }
+
+    public CompletableFuture<Long> getBanProposeCooldownAsync(UUID uuid) {
+        return supplyAsync(() -> {
+            try (PreparedStatement ps = connection.prepareStatement(
+                    "SELECT until_ms FROM ban_propose_cooldown WHERE uuid = ?")) {
+                ps.setString(1, uuid.toString());
+                ResultSet rs = ps.executeQuery();
+                if (rs.next()) return rs.getLong(1);
+            } catch (SQLException e) { e.printStackTrace(); }
+            return 0L;
+        });
+    }
+
+    public void clearBanProposeCooldown(UUID uuid) {
+        runAsync(() -> {
+            try (PreparedStatement ps = connection.prepareStatement(
+                    "DELETE FROM ban_propose_cooldown WHERE uuid = ?")) {
+                ps.setString(1, uuid.toString());
+                ps.executeUpdate();
             } catch (SQLException e) { e.printStackTrace(); }
         });
     }
