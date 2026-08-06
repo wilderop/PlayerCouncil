@@ -98,7 +98,7 @@ public class ProposalManager {
     }
 
     private void checkAndExecute(Proposal p) {
-        int required = getRequiredVotes(p.getType());
+        int required = getRequiredVotes(p);
         if (p.getYesCount() < required) return;
 
         plugin.getDatabaseManager().markProposalExecuted(p.getId());
@@ -111,9 +111,17 @@ public class ProposalManager {
         plugin.getDatabaseManager().log("Proposal #" + p.getId() + " PASSED - " + p.getDescription());
     }
 
-    private int getRequiredVotes(Proposal.Type type) {
-        return switch (type) {
-            case BAN -> plugin.getConfig().getInt("voting.ban", 1);
+    private int getRequiredVotes(Proposal p) {
+        if (p.getType() == Proposal.Type.BAN || p.getType() == Proposal.Type.REBAN
+                || p.getType() == Proposal.Type.PARDON || p.getType() == Proposal.Type.REPARDON) {
+            if (p.getValue() != null && !p.getValue().isBlank()) {
+                try {
+                    return Integer.parseInt(p.getValue().trim());
+                } catch (NumberFormatException ignored) {}
+            }
+        }
+        return switch (p.getType()) {
+            case BAN -> plugin.getConfig().getInt("voting.ban-new", 1);
             case PARDON -> plugin.getConfig().getInt("voting.pardon", 2);
             case REBAN -> plugin.getConfig().getInt("voting.reban", 4);
             case REPARDON -> plugin.getConfig().getInt("voting.repardon", 8);
@@ -126,7 +134,7 @@ public class ProposalManager {
         switch (p.getType()) {
             case BAN, REBAN -> Bukkit.getScheduler().runTask(plugin, () -> {
                 String reason = p.getType() == Proposal.Type.BAN ? "Council ban" : "Council re-ban";
-                Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "ban " + p.getTarget() + " " + reason);
+                dispatchBan(p.getTarget(), reason);
                 OfflinePlayer off = plugin.getBanVoteManager().resolveOffline(p.getTarget());
                 UUID uuid = off.getUniqueId();
                 plugin.getCouncilManager().removeMember(uuid);
@@ -134,7 +142,8 @@ public class ProposalManager {
                         off.getName() != null ? off.getName() : p.getTarget());
             });
             case PARDON, REPARDON -> Bukkit.getScheduler().runTask(plugin, () -> {
-                Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "pardon " + p.getTarget());
+                String reason = p.getType() == Proposal.Type.PARDON ? "Council pardon" : "Council re-pardon";
+                dispatchUnban(p.getTarget(), reason);
                 OfflinePlayer off = plugin.getBanVoteManager().resolveOffline(p.getTarget());
                 UUID targetUuid = off.getUniqueId();
                 plugin.getBanVoteManager().advanceAfterSuccess(p.getType(), targetUuid,
@@ -156,11 +165,57 @@ public class ProposalManager {
         }
     }
 
+    private void dispatchBan(String playerName, String reason) {
+        String provider = plugin.getConfig().getString("ban.provider", "smartban");
+        String template = plugin.getConfig().getString("ban.ban-command", "ban {player} {reason}");
+        String cmd = template
+                .replace("{player}", playerName)
+                .replace("{reason}", reason == null || reason.isBlank() ? "Council ban" : reason);
+
+        if ("vanilla".equalsIgnoreCase(provider)) {
+            OfflinePlayer off = Bukkit.getOfflinePlayer(playerName);
+            if (off.getName() != null) {
+                Bukkit.getBanList(org.bukkit.BanList.Type.NAME).addBan(
+                        off.getName(), reason, (java.util.Date) null, "PlayerCouncil");
+            }
+            Player online = Bukkit.getPlayerExact(playerName);
+            if (online != null) {
+                online.kick(net.kyori.adventure.text.Component.text(reason));
+            }
+            plugin.getLogger().info("Vanilla ban applied to " + playerName + ": " + reason);
+        } else {
+            boolean ok = Bukkit.dispatchCommand(Bukkit.getConsoleSender(), cmd);
+            plugin.getLogger().info("Ban command [" + provider + "] dispatched (" + ok + "): " + cmd);
+        }
+        plugin.getDatabaseManager().log("Banned " + playerName + " via " + provider + ": " + reason);
+    }
+
+    private void dispatchUnban(String playerName, String reason) {
+        String provider = plugin.getConfig().getString("ban.provider", "smartban");
+        String template = plugin.getConfig().getString("ban.unban-command", "unban {player} {reason}");
+        String cmd = template
+                .replace("{player}", playerName)
+                .replace("{reason}", reason == null || reason.isBlank() ? "Council pardon" : reason);
+
+        if ("vanilla".equalsIgnoreCase(provider)) {
+            OfflinePlayer off = Bukkit.getOfflinePlayer(playerName);
+            if (off.getName() != null) {
+                Bukkit.getBanList(org.bukkit.BanList.Type.NAME).pardon(off.getName());
+            }
+            plugin.getLogger().info("Vanilla unban applied to " + playerName);
+        } else {
+            boolean ok = Bukkit.dispatchCommand(Bukkit.getConsoleSender(), cmd);
+            plugin.getLogger().info("Unban command [" + provider + "] dispatched (" + ok + "): " + cmd);
+        }
+        plugin.getDatabaseManager().log("Unbanned " + playerName + " via " + provider + ": " + reason);
+    }
+
     private void offlineNotifyCooldown(OfflinePlayer off, int days) {
-        if (off.isOnline() && off.getPlayer() != null) {
-            off.getPlayer().sendMessage(MiniMessage.miniMessage().deserialize(
-                    "<gray>[<gold>Council</gold>]</gray> <yellow>Your ban was overturned. You cannot propose bans for <white>"
-                            + days + "</white> day(s)."));
+        Player online = off.getPlayer();
+        if (online != null && online.isOnline()) {
+            online.sendMessage(MiniMessage.miniMessage().deserialize(
+                    "<gray>[<gold>Council</gold>]</gray> <yellow>Your council ban was overturned. "
+                            + "You cannot propose bans for <white>" + days + "</white> day(s)."));
         }
     }
 
