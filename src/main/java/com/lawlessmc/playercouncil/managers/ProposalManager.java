@@ -136,8 +136,16 @@ public class ProposalManager {
             case PARDON, REPARDON -> Bukkit.getScheduler().runTask(plugin, () -> {
                 Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "pardon " + p.getTarget());
                 OfflinePlayer off = plugin.getBanVoteManager().resolveOffline(p.getTarget());
-                plugin.getBanVoteManager().advanceAfterSuccess(p.getType(), off.getUniqueId(),
+                UUID targetUuid = off.getUniqueId();
+                plugin.getBanVoteManager().advanceAfterSuccess(p.getType(), targetUuid,
                         off.getName() != null ? off.getName() : p.getTarget());
+                int days = plugin.getConfig().getInt("voting.ban-cooldown-days", 7);
+                long until = System.currentTimeMillis() + days * 24L * 60L * 60L * 1000L;
+                plugin.getDatabaseManager().setBanProposeCooldown(targetUuid, until);
+                plugin.getDatabaseManager().log("Ban-propose cooldown applied to "
+                        + (off.getName() != null ? off.getName() : p.getTarget())
+                        + " for " + days + " day(s) after pardon.");
+                offlineNotifyCooldown(off, days);
             });
             case GAMERULE -> Bukkit.getScheduler().runTask(plugin, () -> applyGameRuleAllWorlds(p.getTarget(), p.getValue()));
             case PLUGIN_ENABLE, PLUGIN_DISABLE -> {
@@ -145,6 +153,14 @@ public class ProposalManager {
                 plugin.getDatabaseManager().setPendingPluginAction(p.getTarget(), enable);
                 scheduleRestart();
             }
+        }
+    }
+
+    private void offlineNotifyCooldown(OfflinePlayer off, int days) {
+        if (off.isOnline() && off.getPlayer() != null) {
+            off.getPlayer().sendMessage(MiniMessage.miniMessage().deserialize(
+                    "<gray>[<gold>Council</gold>]</gray> <yellow>Your ban was overturned. You cannot propose bans for <white>"
+                            + days + "</white> day(s)."));
         }
     }
 
