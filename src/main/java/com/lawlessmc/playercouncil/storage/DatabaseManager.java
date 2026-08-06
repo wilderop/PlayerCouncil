@@ -31,7 +31,9 @@ public class DatabaseManager {
                 if (!plugin.getDataFolder().exists()) plugin.getDataFolder().mkdirs();
                 connection = DriverManager.getConnection("jdbc:sqlite:" + dbFile.getAbsolutePath());
                 try (Statement st = connection.createStatement()) {
-                    st.execute("PRAGMA journal_mode=WAL");
+                    // DELETE journal avoids WAL shared-memory (-shm) which fails on some
+                    // VPS/container/network filesystems with SQLITE_IOERR_SHMMAP.
+                    st.execute("PRAGMA journal_mode=DELETE");
                     st.execute("PRAGMA busy_timeout=5000");
                     st.execute("PRAGMA synchronous=NORMAL");
                 }
@@ -406,6 +408,7 @@ public class DatabaseManager {
                  ResultSet rs = st.executeQuery("SELECT plugin_name, enable FROM pending_plugin_actions")) {
                 while (rs.next()) map.put(rs.getString("plugin_name"), rs.getInt("enable") == 1);
             } catch (SQLException e) { e.printStackTrace(); }
+            return map;
         });
         return map;
     }
