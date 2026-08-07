@@ -1,1 +1,4 @@
-see-local-file-too-large-use-create
+package com.lawlessmc.playercouncil.managers;
+
+// TEMP - will be replaced
+public class ProposalManager {}
