@@ -220,41 +220,58 @@ public class ProposalManager {
     }
 
     private void applyGameRuleAllWorlds(String ruleName, String valueStr) {
+        String n = ruleName;
+        int colon = n.indexOf(':');
+        if (colon >= 0) n = n.substring(colon + 1);
+
         GameRule<?> matched = null;
         for (GameRule<?> rule : GameRule.values()) {
-            if (rule.getName().equalsIgnoreCase(ruleName)) {
+            if (rule.getName().equalsIgnoreCase(n) || rule.getName().equalsIgnoreCase(ruleName)) {
                 matched = rule;
                 break;
             }
         }
-        if (matched == null) {
-            Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "gamerule " + ruleName + " " + valueStr);
-            plugin.getLogger().warning("Unknown GameRule API name '" + ruleName + "', used console fallback.");
-            return;
+
+        boolean anyOk = false;
+        if (matched != null) {
+            final GameRule<?> rule = matched;
+            for (var world : Bukkit.getWorlds()) {
+                try {
+                    Class<?> type = rule.getType();
+                    if (type == Boolean.class) {
+                        @SuppressWarnings("unchecked")
+                        GameRule<Boolean> br = (GameRule<Boolean>) rule;
+                        world.setGameRule(br, Boolean.parseBoolean(valueStr));
+                        anyOk = true;
+                    } else if (type == Integer.class) {
+                        @SuppressWarnings("unchecked")
+                        GameRule<Integer> ir = (GameRule<Integer>) rule;
+                        world.setGameRule(ir, Integer.parseInt(valueStr));
+                        anyOk = true;
+                    }
+                } catch (Exception e) {
+                    plugin.getLogger().warning("Failed GameRule API " + ruleName + " on "
+                            + world.getName() + ": " + e.getMessage());
+                }
+            }
         }
 
-        final GameRule<?> rule = matched;
         for (var world : Bukkit.getWorlds()) {
             try {
-                Class<?> type = rule.getType();
-                if (type == Boolean.class) {
-                    @SuppressWarnings("unchecked")
-                    GameRule<Boolean> br = (GameRule<Boolean>) rule;
-                    world.setGameRule(br, Boolean.parseBoolean(valueStr));
-                } else if (type == Integer.class) {
-                    @SuppressWarnings("unchecked")
-                    GameRule<Integer> ir = (GameRule<Integer>) rule;
-                    world.setGameRule(ir, Integer.parseInt(valueStr));
-                } else {
-                    Bukkit.dispatchCommand(Bukkit.getConsoleSender(),
-                            "execute in " + world.getKey() + " run gamerule " + ruleName + " " + valueStr);
-                }
+                boolean ok = Bukkit.dispatchCommand(Bukkit.getConsoleSender(),
+                        "execute in " + world.getKey() + " run gamerule " + n + " " + valueStr);
+                if (ok) anyOk = true;
             } catch (Exception e) {
-                plugin.getLogger().warning("Failed gamerule " + ruleName + " on world "
+                plugin.getLogger().warning("Failed console gamerule " + n + " on "
                         + world.getName() + ": " + e.getMessage());
             }
         }
-        plugin.getLogger().info("Applied gamerule " + ruleName + "=" + valueStr + " to all worlds.");
+
+        if (anyOk) {
+            plugin.getLogger().info("Applied gamerule " + n + "=" + valueStr + " to all worlds.");
+        } else {
+            plugin.getLogger().warning("Could not apply gamerule " + n + "=" + valueStr);
+        }
     }
 
     private void scheduleRestart() {
@@ -329,10 +346,19 @@ public class ProposalManager {
     }
 
     public boolean isValidGameRule(String name) {
+        if (name == null || name.isBlank()) return false;
+        String n = name;
+        int colon = n.indexOf(':');
+        if (colon >= 0) n = n.substring(colon + 1);
+
         for (GameRule<?> rule : GameRule.values()) {
-            if (rule.getName().equalsIgnoreCase(name)) return true;
+            if (rule.getName().equalsIgnoreCase(n) || rule.getName().equalsIgnoreCase(name)) {
+                return true;
+            }
         }
-        return false;
+
+        // 1.21.11+ / 26.x snake_case names may not all appear in GameRule.values()
+        return n.matches("[a-zA-Z0-9_]+");
     }
 
     public boolean isWhitelistedPlugin(String name) {
