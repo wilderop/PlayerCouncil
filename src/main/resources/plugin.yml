@@ -19,6 +19,7 @@ commands:
   propose:
     description: Create a new proposal (council only)
     usage: /propose <type> <args...>
+    aliases: [proposal]
     permission: playercouncil.council
   councilvote:
     description: Vote on a council proposal
