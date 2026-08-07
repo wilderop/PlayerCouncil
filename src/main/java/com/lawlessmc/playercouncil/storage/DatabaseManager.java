@@ -31,8 +31,6 @@ public class DatabaseManager {
                 if (!plugin.getDataFolder().exists()) plugin.getDataFolder().mkdirs();
                 connection = DriverManager.getConnection("jdbc:sqlite:" + dbFile.getAbsolutePath());
                 try (Statement st = connection.createStatement()) {
-                    // DELETE journal avoids WAL shared-memory (-shm) which fails on some
-                    // VPS/container/network filesystems with SQLITE_IOERR_SHMMAP.
                     st.execute("PRAGMA journal_mode=DELETE");
                     st.execute("PRAGMA busy_timeout=5000");
                     st.execute("PRAGMA synchronous=NORMAL");
@@ -58,6 +56,8 @@ public class DatabaseManager {
             st.execute("CREATE TABLE IF NOT EXISTS ban_ladder (uuid TEXT PRIMARY KEY, name TEXT, stage INTEGER NOT NULL DEFAULT 0)");
             st.execute("CREATE TABLE IF NOT EXISTS snapshot_stats (uuid TEXT NOT NULL, timestamp INTEGER NOT NULL, stat TEXT NOT NULL, value INTEGER NOT NULL, PRIMARY KEY (uuid, timestamp, stat))");
             st.execute("CREATE TABLE IF NOT EXISTS ban_propose_cooldown (uuid TEXT PRIMARY KEY, until_ms INTEGER NOT NULL)");
+            st.execute("CREATE TABLE IF NOT EXISTS player_ips (uuid TEXT NOT NULL, ip TEXT NOT NULL, last_seen INTEGER NOT NULL, PRIMARY KEY (uuid, ip))");
+            st.execute("CREATE INDEX IF NOT EXISTS idx_player_ips_ip ON player_ips(ip)");
             migrateLegacySnapshots(st);
         }
     }
@@ -471,6 +471,68 @@ public class DatabaseManager {
                 ps.setString(1, uuid.toString());
                 ps.executeUpdate();
             } catch (SQLException e) { e.printStackTrace(); }
+        });
+    }
+
+    public void recordPlayerIp(UUID uuid, String ip) {
+        if (ip == null || ip.isBlank()) return;
+        String clean = ip.startsWith("/") ? ip.substring(1) : ip;
+        final String ipFinal = clean;
+        runAsync(() -> {
+            try (PreparedStatement ps = connection.prepareStatement(
+                    "INSERT INTO player_ips (uuid, ip, last_seen) VALUES (?, ?, ?) " +
+                    "ON CONFLICT(uuid, ip) DO UPDATE SET last_seen = excluded.last_seen")) {
+                ps.setString(1, uuid.toString());
+                ps.setString(2, ipFinal);
+                ps.setLong(3, System.currentTimeMillis());
+                ps.executeUpdate();
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
+        });
+    }
+
+    public CompletableFuture<Map<UUID, Set<UUID>>> getIpRelatedGroupsAsync(Collection<UUID> candidates) {
+        return supplyAsync(() -> {
+            Set<UUID> cand = new HashSet<>(candidates);
+            Map<UUID, Set<String>> ipsByUuid = new HashMap<>();
+            Map<String, Set<UUID>> uuidsByIp = new HashMap<>();
+            if (cand.isEmpty()) return Map.of();
+
+            List<UUID> list = new ArrayList<>(cand);
+            StringBuilder placeholders = new StringBuilder();
+            for (int i = 0; i < list.size(); i++) {
+                if (i > 0) placeholders.append(',');
+                placeholders.append('?');
+            }
+            String sql = "SELECT uuid, ip FROM player_ips WHERE uuid IN (" + placeholders + ")";
+            try (PreparedStatement ps = connection.prepareStatement(sql)) {
+                for (int i = 0; i < list.size(); i++) {
+                    ps.setString(i + 1, list.get(i).toString());
+                }
+                ResultSet rs = ps.executeQuery();
+                while (rs.next()) {
+                    UUID u = UUID.fromString(rs.getString("uuid"));
+                    String ip = rs.getString("ip");
+                    ipsByUuid.computeIfAbsent(u, k -> new HashSet<>()).add(ip);
+                    uuidsByIp.computeIfAbsent(ip, k -> new HashSet<>()).add(u);
+                }
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
+
+            Map<UUID, Set<UUID>> related = new HashMap<>();
+            for (UUID u : cand) {
+                Set<UUID> group = new HashSet<>();
+                group.add(u);
+                for (String ip : ipsByUuid.getOrDefault(u, Set.of())) {
+                    for (UUID other : uuidsByIp.getOrDefault(ip, Set.of())) {
+                        if (cand.contains(other)) group.add(other);
+                    }
+                }
+                related.put(u, group);
+            }
+            return related;
         });
     }
 }
