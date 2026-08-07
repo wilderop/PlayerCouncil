@@ -8,6 +8,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.permissions.PermissionAttachment;
 
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 
 public class CouncilManager {
 
@@ -25,11 +26,66 @@ public class CouncilManager {
         long since = System.currentTimeMillis() - (30L * 24 * 60 * 60 * 1000);
 
         plugin.getActivityManager().getRankedPlayersAsync(since, minHours)
+                .thenCompose(this::filterSharedIpAlts)
                 .thenAccept(ranked -> Bukkit.getScheduler().runTask(plugin, () -> applyRanking(ranked, size)))
                 .exceptionally(ex -> {
                     plugin.getLogger().warning("Council recalc failed: " + ex.getMessage());
                     return null;
                 });
+    }
+
+    /**
+     * Among accounts that have ever shared an IP, only the one with the most
+     * total playtime remains eligible for council. Others are dropped.
+     */
+    private CompletableFuture<List<Map.Entry<UUID, Double>>> filterSharedIpAlts(
+            List<Map.Entry<UUID, Double>> ranked) {
+        if (ranked.isEmpty()) {
+            return CompletableFuture.completedFuture(ranked);
+        }
+        List<UUID> uuids = ranked.stream().map(Map.Entry::getKey).toList();
+        return plugin.getDatabaseManager().getIpRelatedGroupsAsync(uuids).thenCompose(related -> {
+            List<CompletableFuture<AbstractMap.SimpleEntry<UUID, Long>>> hourFutures = new ArrayList<>();
+            for (UUID u : uuids) {
+                hourFutures.add(plugin.getDatabaseManager().getTotalPlaytimeAsync(u)
+                        .thenApply(h -> new AbstractMap.SimpleEntry<>(u, h)));
+            }
+            return CompletableFuture.allOf(hourFutures.toArray(new CompletableFuture[0]))
+                    .thenApply(v -> {
+                        Map<UUID, Long> hours = new HashMap<>();
+                        for (var f : hourFutures) {
+                            var e = f.join();
+                            hours.put(e.getKey(), e.getValue());
+                        }
+                        Set<UUID> blocked = new HashSet<>();
+                        for (UUID u : uuids) {
+                            if (blocked.contains(u)) continue;
+                            Set<UUID> group = related.getOrDefault(u, Set.of(u));
+                            UUID best = u;
+                            long bestHours = hours.getOrDefault(u, 0L);
+                            for (UUID other : group) {
+                                long h = hours.getOrDefault(other, 0L);
+                                if (h > bestHours || (h == bestHours && other.toString().compareTo(best.toString()) < 0)) {
+                                    best = other;
+                                    bestHours = h;
+                                }
+                            }
+                            for (UUID other : group) {
+                                if (!other.equals(best)) blocked.add(other);
+                            }
+                        }
+                        List<Map.Entry<UUID, Double>> filtered = new ArrayList<>();
+                        for (Map.Entry<UUID, Double> e : ranked) {
+                            if (!blocked.contains(e.getKey())) filtered.add(e);
+                        }
+                        int removed = ranked.size() - filtered.size();
+                        if (removed > 0) {
+                            plugin.getLogger().info("IP alt filter removed " + removed
+                                    + " account(s) from council eligibility (kept highest playtime per shared IP).");
+                        }
+                        return filtered;
+                    });
+        });
     }
 
     private void applyRanking(List<Map.Entry<UUID, Double>> ranked, int size) {
