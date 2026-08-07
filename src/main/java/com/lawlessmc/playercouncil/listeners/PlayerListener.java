@@ -25,6 +25,7 @@ public class PlayerListener implements Listener {
     public void onJoin(PlayerJoinEvent event) {
         Player player = event.getPlayer();
         captureAndStore(player);
+        recordIp(player);
         plugin.getServer().getScheduler().runTask(plugin, () ->
                 plugin.getCouncilManager().onPlayerJoin(player));
     }
@@ -48,5 +49,15 @@ public class PlayerListener implements Listener {
         ActivitySnapshot snap = new ActivitySnapshot(uuid, now, values);
         plugin.getDatabaseManager().saveSnapshot(snap);
         plugin.getDatabaseManager().upsertPlayerMeta(uuid, name, firstPlayed, playtime);
+    }
+
+    private void recordIp(Player player) {
+        try {
+            if (player.getAddress() == null || player.getAddress().getAddress() == null) return;
+            String ip = player.getAddress().getAddress().getHostAddress();
+            plugin.getDatabaseManager().recordPlayerIp(player.getUniqueId(), ip);
+        } catch (Exception e) {
+            plugin.getLogger().warning("Failed to record IP for " + player.getName() + ": " + e.getMessage());
+        }
     }
 }
