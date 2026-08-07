@@ -40,7 +40,7 @@ public class ProposeCommand implements CommandExecutor {
             int have = plugin.getCouncilManager().getCouncilMembers().size();
             player.sendMessage(mm.deserialize(
                     "<red>Council voting is not active yet. Need at least <yellow>" + need +
-                    "</yellow> members (currently <yellow>" + have + "</yellow>)."));
+                    "</yellow> members (currently <yellow>" + have + "</yellow>)." ));
             return true;
         }
 
@@ -93,7 +93,8 @@ public class ProposeCommand implements CommandExecutor {
                 plugin.getDatabaseManager().getBanProposeCooldownAsync(player.getUniqueId()).thenAccept(until ->
                         plugin.getServer().getScheduler().runTask(plugin, () -> {
                             if (until > System.currentTimeMillis()) {
-                                long leftH = (until - System.currentTimeMillis()) / (1000L * 60L * 60L);
+                                long leftMs = until - System.currentTimeMillis();
+                                long leftH = leftMs / (1000L * 60L * 60L);
                                 player.sendMessage(mm.deserialize(
                                         "<red>You cannot propose bans for another <yellow>" + leftH
                                                 + "</yellow> hour(s) (cooldown after your ban was overturned)."));
@@ -150,12 +151,24 @@ public class ProposeCommand implements CommandExecutor {
                     player.sendMessage(mm.deserialize("<red>Usage: /propose GAMERULE <rule> <value>"));
                     return true;
                 }
-                target = args[1];
+                String rawRule = args[1];
                 value = args[2];
-                if (!plugin.getProposalManager().isValidGameRule(target)) {
-                    player.sendMessage(mm.deserialize("<red>Invalid gamerule name: " + target));
+                String resolved = plugin.getProposalManager().resolveGameruleInput(rawRule);
+                if (resolved == null) {
+                    player.sendMessage(mm.deserialize("<red>Invalid gamerule name: <white>" + rawRule));
+                    String hint = plugin.getProposalManager().findClosestGamerule(rawRule);
+                    if (hint != null) {
+                        player.sendMessage(mm.deserialize("<gray>Did you mean <yellow>" + hint + "</yellow>?"));
+                    } else {
+                        player.sendMessage(mm.deserialize("<gray>Example: <yellow>/propose GAMERULE spawn_phantoms false"));
+                    }
                     return true;
                 }
+                if (!resolved.equalsIgnoreCase(rawRule) && !normalizeLoose(rawRule).equals(normalizeLoose(resolved))) {
+                    player.sendMessage(mm.deserialize("<gray>Interpreted gamerule <white>" + rawRule
+                            + "</white> as <yellow>" + resolved + "</yellow>."));
+                }
+                target = resolved;
             }
             case PLUGIN_ENABLE, PLUGIN_DISABLE -> {
                 if (args.length < 2) {
@@ -182,23 +195,8 @@ public class ProposeCommand implements CommandExecutor {
         return true;
     }
 
-    private void startBanLadder(Player player, String targetName, boolean wantBan) {
-        player.sendMessage(mm.deserialize("<gray>Resolving ban ladder for <white>" + targetName + "</white>..."));
-        plugin.getBanVoteManager().resolveLadder(targetName, wantBan).thenAccept(res ->
-                plugin.getServer().getScheduler().runTask(plugin, () -> {
-                    if (res.type() == null) {
-                        player.sendMessage(mm.deserialize("<red>" + res.explanation()));
-                        return;
-                    }
-                    pending.put(player.getUniqueId(), new Pending(res.type(), res.targetName(), null));
-                    player.sendMessage(mm.deserialize("<gold>Confirm proposal:</gold>"));
-                    player.sendMessage(mm.deserialize("  <white>" + res.type().name() + " → " + res.targetName()));
-                    player.sendMessage(mm.deserialize("  <gray>" + res.explanation()));
-                    player.sendMessage(mm.deserialize("  <yellow>Needs <white>" + res.requiredVotes()
-                            + "</white> yes votes to pass."));
-                    player.sendMessage(mm.deserialize(
-                            "<yellow>Type <white>/propose confirm</white> to submit, or <white>/propose cancel</white> to abort."));
-                }));
+    private static String normalizeLoose(String s) {
+        return s == null ? "" : s.trim().toLowerCase().replace("_", "").replace("-", "");
     }
 
     private void sendUsage(Player player) {
@@ -208,5 +206,25 @@ public class ProposeCommand implements CommandExecutor {
         player.sendMessage(mm.deserialize("  <yellow>/propose GAMERULE <rule> <value></yellow> <gray>— all worlds"));
         player.sendMessage(mm.deserialize("  <yellow>/propose PLUGIN_ENABLE <plugin>"));
         player.sendMessage(mm.deserialize("  <yellow>/propose PLUGIN_DISABLE <plugin>"));
+    }
+
+    private void startBanLadder(Player player, String targetName, boolean wantBan) {
+        player.sendMessage(mm.deserialize("<gray>Resolving ban ladder for <white>" + targetName + "</white>..."));
+        plugin.getBanVoteManager().resolveLadder(targetName, wantBan).thenAccept(res ->
+                plugin.getServer().getScheduler().runTask(plugin, () -> {
+                    if (res.type() == null) {
+                        player.sendMessage(mm.deserialize("<red>" + res.explanation()));
+                        return;
+                    }
+                    pending.put(player.getUniqueId(), new Pending(
+                            res.type(), res.targetName(), String.valueOf(res.requiredVotes())));
+                    player.sendMessage(mm.deserialize("<gold>Confirm proposal:</gold>"));
+                    player.sendMessage(mm.deserialize("  <white>" + res.type().name() + " → " + res.targetName()));
+                    player.sendMessage(mm.deserialize("  <gray>" + res.explanation()));
+                    player.sendMessage(mm.deserialize("  <yellow>Needs <white>" + res.requiredVotes()
+                            + "</white> yes votes to pass."));
+                    player.sendMessage(mm.deserialize(
+                            "<yellow>Type <white>/propose confirm</white> to submit, or <white>/propose cancel</white> to abort."));
+                }));
     }
 }
