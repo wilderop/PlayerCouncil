@@ -40,7 +40,7 @@ public class ProposeCommand implements CommandExecutor {
             int have = plugin.getCouncilManager().getCouncilMembers().size();
             player.sendMessage(mm.deserialize(
                     "<red>Council voting is not active yet. Need at least <yellow>" + need +
-                    "</yellow> members (currently <yellow>" + have + "</yellow>)." ));
+                    "</yellow> members (currently <yellow>" + have + "</yellow>)."));
             return true;
         }
 
@@ -81,6 +81,34 @@ public class ProposeCommand implements CommandExecutor {
 
         String action = args[0].toLowerCase();
 
+        // --- Suggestion (advisory text for admin) ---
+        if (action.equals("suggestion") || action.equals("suggest")) {
+            if (args.length < 2) {
+                player.sendMessage(mm.deserialize(
+                        "<red>Usage: /propose suggestion <text up to 256 characters>"));
+                return true;
+            }
+            String text = String.join(" ", java.util.Arrays.copyOfRange(args, 1, args.length)).trim();
+            if (text.isEmpty()) {
+                player.sendMessage(mm.deserialize("<red>Suggestion text cannot be empty."));
+                return true;
+            }
+            if (text.length() > 256) {
+                player.sendMessage(mm.deserialize(
+                        "<red>Suggestion too long (<yellow>" + text.length()
+                                + "</yellow>/256). Shorten it and try again."));
+                return true;
+            }
+            pending.put(player.getUniqueId(), new Pending(Proposal.Type.SUGGESTION, text, null));
+            player.sendMessage(mm.deserialize("<gold>Confirm proposal:</gold> <white>SUGGESTION → " + text));
+            player.sendMessage(mm.deserialize(
+                    "<gray>Advisory only — if it passes, it is recorded for the server admin (no auto action)."));
+            player.sendMessage(mm.deserialize(
+                    "<yellow>Type <white>/propose confirm</white> to submit, or <white>/propose cancel</white> to abort."));
+            return true;
+        }
+
+        // --- Automatic ban / unban ladder ---
         if (action.equals("ban") || action.equals("unban") || action.equals("pardon")) {
             if (args.length < 2) {
                 player.sendMessage(mm.deserialize("<red>Usage: /propose ban <player>  or  /propose unban <player>"));
@@ -90,6 +118,7 @@ public class ProposeCommand implements CommandExecutor {
             String targetName = args[1];
 
             if (wantBan) {
+                // Cooldown after having your own ban overturned
                 plugin.getDatabaseManager().getBanProposeCooldownAsync(player.getUniqueId()).thenAccept(until ->
                         plugin.getServer().getScheduler().runTask(plugin, () -> {
                             if (until > System.currentTimeMillis()) {
@@ -109,14 +138,17 @@ public class ProposeCommand implements CommandExecutor {
             return true;
         }
 
+        // --- Legacy explicit types still allowed (REBAN etc.) but ban/unban preferred ---
         Proposal.Type type;
         try {
             type = Proposal.Type.valueOf(args[0].toUpperCase());
         } catch (IllegalArgumentException e) {
-            player.sendMessage(mm.deserialize("<red>Unknown type. Prefer: ban, unban, GAMERULE, PLUGIN_ENABLE, PLUGIN_DISABLE"));
+            player.sendMessage(mm.deserialize(
+                    "<red>Unknown type. Prefer: ban, unban, suggestion, GAMERULE, PLUGIN_ENABLE, PLUGIN_DISABLE"));
             return true;
         }
 
+        // Redirect old BAN/PARDON/REBAN/REPARDON through the ladder for consistency
         if (type == Proposal.Type.BAN || type == Proposal.Type.REBAN
                 || type == Proposal.Type.PARDON || type == Proposal.Type.REPARDON) {
             if (args.length < 2) {
@@ -181,6 +213,24 @@ public class ProposeCommand implements CommandExecutor {
                     return true;
                 }
             }
+            case SUGGESTION -> {
+                if (args.length < 2) {
+                    player.sendMessage(mm.deserialize(
+                            "<red>Usage: /propose SUGGESTION <text up to 256 characters>"));
+                    return true;
+                }
+                target = String.join(" ", java.util.Arrays.copyOfRange(args, 1, args.length)).trim();
+                if (target.isEmpty()) {
+                    player.sendMessage(mm.deserialize("<red>Suggestion text cannot be empty."));
+                    return true;
+                }
+                if (target.length() > 256) {
+                    player.sendMessage(mm.deserialize(
+                            "<red>Suggestion too long (<yellow>" + target.length()
+                                    + "</yellow>/256). Shorten it and try again."));
+                    return true;
+                }
+            }
             default -> {
                 player.sendMessage(mm.deserialize("<red>Unsupported type."));
                 return true;
@@ -201,8 +251,9 @@ public class ProposeCommand implements CommandExecutor {
 
     private void sendUsage(Player player) {
         player.sendMessage(mm.deserialize("<gold>Proposal types:</gold>"));
-        player.sendMessage(mm.deserialize("  <yellow>/propose ban <player></yellow> <gray>— auto ladder (1 or 4 votes)"));
-        player.sendMessage(mm.deserialize("  <yellow>/propose unban <player></yellow> <gray>— auto ladder (2 or 8 votes)"));
+        player.sendMessage(mm.deserialize("  <yellow>/propose ban <player></yellow> <gray>— auto ladder"));
+        player.sendMessage(mm.deserialize("  <yellow>/propose unban <player></yellow> <gray>— auto ladder"));
+        player.sendMessage(mm.deserialize("  <yellow>/propose suggestion <text></yellow> <gray>— advisory (max 256 chars)"));
         player.sendMessage(mm.deserialize("  <yellow>/propose GAMERULE <rule> <value></yellow> <gray>— all worlds"));
         player.sendMessage(mm.deserialize("  <yellow>/propose PLUGIN_ENABLE <plugin>"));
         player.sendMessage(mm.deserialize("  <yellow>/propose PLUGIN_DISABLE <plugin>"));
