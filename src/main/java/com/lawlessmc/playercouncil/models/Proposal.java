@@ -6,17 +6,19 @@ public class Proposal {
 
     public enum Type {
         BAN, PARDON, REBAN, REPARDON,
-        GAMERULE, PLUGIN_ENABLE, PLUGIN_DISABLE
+        GAMERULE, PLUGIN_ENABLE, PLUGIN_DISABLE,
+        /** Advisory text for the server admin — no automatic action on pass. */
+        SUGGESTION
     }
 
     private final int id;
     private final Type type;
     private final UUID proposer;
-    private final String target;
-    private final String value;
+    private final String target; // player name, gamerule name, or plugin name
+    private final String value;  // for gamerule: the new value; otherwise null
     private final long createdAt;
     private final long expiresAt;
-    private final Map<UUID, Boolean> votes;
+    private final Map<UUID, Boolean> votes; // true = yes, false = no
     private boolean cancelled;
     private boolean executed;
 
@@ -81,6 +83,7 @@ public class Proposal {
             case GAMERULE -> "Set gamerule " + target + " to " + value;
             case PLUGIN_ENABLE -> "Enable plugin " + target;
             case PLUGIN_DISABLE -> "Disable plugin " + target;
+            case SUGGESTION -> "Suggestion: " + target;
         };
     }
 }

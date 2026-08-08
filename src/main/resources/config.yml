@@ -48,6 +48,8 @@ voting:
   council-ban: 8
   gamerule: 8
   plugin: 8
+  # Advisory suggestion proposals (text only, no auto action)
+  suggestion: 8
   proposal-timeout-days: 7
   restart-warning-minutes: 10
   # After a ban on you is overturned, you cannot propose bans for this many days
