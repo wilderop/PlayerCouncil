@@ -34,6 +34,7 @@ public class DatabaseManager {
                     st.execute("PRAGMA journal_mode=DELETE");
                     st.execute("PRAGMA busy_timeout=5000");
                     st.execute("PRAGMA synchronous=NORMAL");
+                    st.execute("PRAGMA foreign_keys=ON");
                 }
                 createTables();
                 pruneOldSnapshotsInternal(30);
@@ -48,7 +49,8 @@ public class DatabaseManager {
         try (Statement st = connection.createStatement()) {
             st.execute("CREATE TABLE IF NOT EXISTS snapshots (uuid TEXT NOT NULL, timestamp INTEGER NOT NULL, playtime INTEGER NOT NULL, walk INTEGER NOT NULL, fly INTEGER NOT NULL, mob_kills INTEGER NOT NULL, PRIMARY KEY (uuid, timestamp))");
             st.execute("CREATE TABLE IF NOT EXISTS player_meta (uuid TEXT PRIMARY KEY, name TEXT, first_join INTEGER, total_playtime INTEGER DEFAULT 0)");
-            st.execute("CREATE TABLE IF NOT EXISTS proposals (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL, proposer TEXT NOT NULL, target TEXT NOT NULL, value TEXT, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, cancelled INTEGER DEFAULT 0, executed INTEGER DEFAULT 0)");
+            st.execute("CREATE TABLE IF NOT EXISTS proposals (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL, proposer TEXT NOT NULL, target TEXT NOT NULL, value TEXT, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, cancelled INTEGER DEFAULT 0, executed INTEGER DEFAULT 0, discord_thread_id TEXT)");
+            try { st.execute("ALTER TABLE proposals ADD COLUMN discord_thread_id TEXT"); } catch (SQLException ignored) {}
             st.execute("CREATE TABLE IF NOT EXISTS votes (proposal_id INTEGER NOT NULL, voter TEXT NOT NULL, yes INTEGER NOT NULL, PRIMARY KEY (proposal_id, voter))");
             st.execute("CREATE TABLE IF NOT EXISTS council (uuid TEXT PRIMARY KEY, name TEXT, rank INTEGER)");
             st.execute("CREATE TABLE IF NOT EXISTS audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp INTEGER NOT NULL, message TEXT NOT NULL)");
@@ -58,6 +60,7 @@ public class DatabaseManager {
             st.execute("CREATE TABLE IF NOT EXISTS ban_propose_cooldown (uuid TEXT PRIMARY KEY, until_ms INTEGER NOT NULL)");
             st.execute("CREATE TABLE IF NOT EXISTS player_ips (uuid TEXT NOT NULL, ip TEXT NOT NULL, last_seen INTEGER NOT NULL, PRIMARY KEY (uuid, ip))");
             st.execute("CREATE INDEX IF NOT EXISTS idx_player_ips_ip ON player_ips(ip)");
+            st.execute("CREATE TABLE IF NOT EXISTS player_prefs (uuid TEXT PRIMARY KEY, scoreboard INTEGER NOT NULL DEFAULT 0)");
             migrateLegacySnapshots(st);
         }
     }
@@ -361,6 +364,10 @@ public class DatabaseManager {
                 rs.getLong("created_at"), rs.getLong("expires_at"));
         p.setCancelled(rs.getInt("cancelled") == 1);
         p.setExecuted(rs.getInt("executed") == 1);
+        try {
+            String tid = rs.getString("discord_thread_id");
+            if (tid != null && !tid.isBlank()) p.setDiscordThreadId(tid);
+        } catch (SQLException ignored) {}
         return p;
     }
 
@@ -370,6 +377,53 @@ public class DatabaseManager {
             ResultSet rs = ps.executeQuery();
             while (rs.next()) p.addVote(UUID.fromString(rs.getString("voter")), rs.getInt("yes") == 1);
         } catch (SQLException e) { e.printStackTrace(); }
+    }
+
+    public void setDiscordThreadId(int proposalId, String threadId) {
+        runAsync(() -> {
+            try (PreparedStatement ps = connection.prepareStatement(
+                    "UPDATE proposals SET discord_thread_id = ? WHERE id = ?")) {
+                ps.setString(1, threadId);
+                ps.setInt(2, proposalId);
+                ps.executeUpdate();
+            } catch (SQLException e) { e.printStackTrace(); }
+        });
+    }
+
+    public void setScoreboardOptIn(UUID uuid, boolean on) {
+        runAsync(() -> {
+            try (PreparedStatement ps = connection.prepareStatement(
+                    "INSERT INTO player_prefs (uuid, scoreboard) VALUES (?, ?) "
+                            + "ON CONFLICT(uuid) DO UPDATE SET scoreboard = excluded.scoreboard")) {
+                ps.setString(1, uuid.toString());
+                ps.setInt(2, on ? 1 : 0);
+                ps.executeUpdate();
+            } catch (SQLException e) { e.printStackTrace(); }
+        });
+    }
+
+    public CompletableFuture<Boolean> isScoreboardOptInAsync(UUID uuid) {
+        return supplyAsync(() -> {
+            try (PreparedStatement ps = connection.prepareStatement(
+                    "SELECT scoreboard FROM player_prefs WHERE uuid = ?")) {
+                ps.setString(1, uuid.toString());
+                ResultSet rs = ps.executeQuery();
+                if (rs.next()) return rs.getInt(1) == 1;
+            } catch (SQLException e) { e.printStackTrace(); }
+            return false;
+        });
+    }
+
+    public CompletableFuture<Set<UUID>> loadScoreboardOptInsAsync() {
+        return supplyAsync(() -> {
+            Set<UUID> set = new HashSet<>();
+            try (PreparedStatement ps = connection.prepareStatement(
+                    "SELECT uuid FROM player_prefs WHERE scoreboard = 1");
+                 ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) set.add(UUID.fromString(rs.getString(1)));
+            } catch (SQLException e) { e.printStackTrace(); }
+            return set;
+        });
     }
 
     public void log(String message) {
@@ -407,9 +461,7 @@ public class DatabaseManager {
             try (Statement st = connection.createStatement();
                  ResultSet rs = st.executeQuery("SELECT plugin_name, enable FROM pending_plugin_actions")) {
                 while (rs.next()) map.put(rs.getString("plugin_name"), rs.getInt("enable") == 1);
-            } catch (SQLException e) {
-                e.printStackTrace();
-            }
+            } catch (SQLException e) { e.printStackTrace(); }
         });
         return map;
     }
@@ -486,9 +538,7 @@ public class DatabaseManager {
                 ps.setString(2, ipFinal);
                 ps.setLong(3, System.currentTimeMillis());
                 ps.executeUpdate();
-            } catch (SQLException e) {
-                e.printStackTrace();
-            }
+            } catch (SQLException e) { e.printStackTrace(); }
         });
     }
 
@@ -517,9 +567,7 @@ public class DatabaseManager {
                     ipsByUuid.computeIfAbsent(u, k -> new HashSet<>()).add(ip);
                     uuidsByIp.computeIfAbsent(ip, k -> new HashSet<>()).add(u);
                 }
-            } catch (SQLException e) {
-                e.printStackTrace();
-            }
+            } catch (SQLException e) { e.printStackTrace(); }
 
             Map<UUID, Set<UUID>> related = new HashMap<>();
             for (UUID u : cand) {
