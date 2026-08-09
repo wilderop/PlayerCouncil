@@ -31,8 +31,13 @@ commands:
     usage: /cancelproposal <id>
     permission: playercouncil.council
   activity:
-    description: View activity rankings
-    usage: /activity [week|month]
+    description: View activity rankings or your breakdown
+    usage: /activity [me|week|month|<player>]
+    permission: playercouncil.use
+  councilboard:
+    description: Toggle the activity scoreboard sidebar (requires display.enabled)
+    usage: /councilboard
+    aliases: [pcboard, activityboard]
     permission: playercouncil.use
   counciladmin:
     description: Admin commands for the council system
