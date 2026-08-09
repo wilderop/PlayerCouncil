@@ -33,14 +33,25 @@ public class ProposalManager {
                         proposer.sendMessage(MiniMessage.miniMessage().deserialize("<red>Failed to create proposal."));
                         return;
                     }
+                    String desc = describe(type, target, value);
                     String msg = proposer.getName() + " proposed: " + type.name() + " → " + target
                             + (value != null ? " = " + value : "");
                     plugin.getDatabaseManager().log(msg);
                     broadcast("<yellow>" + proposer.getName() + "</yellow> created proposal <gold>#" + id
-                            + "</gold>: " + describe(type, target, value));
-                    plugin.getDiscordWebhook().send("**New Proposal #" + id + "**\n"
-                            + proposer.getName() + ": " + describe(type, target, value));
+                            + "</gold>: " + desc);
                     proposer.sendMessage(MiniMessage.miniMessage().deserialize("<green>Proposal #" + id + " created."));
+
+                    String body = "**New Proposal #" + id + "** — " + desc + "\n"
+                            + "Proposer: **" + proposer.getName() + "**\n"
+                            + "In-game: `/councilvote " + id + " yes` or `/councilvote " + id + " no`";
+                    plugin.getDiscordWebhook().createProposalThread(id, desc, body)
+                            .thenAccept(threadId -> {
+                                if (threadId != null && !threadId.isBlank()) {
+                                    plugin.getDatabaseManager().setDiscordThreadId(id, threadId);
+                                    plugin.getLogger().info("Discord thread created for proposal #" + id
+                                            + ": " + threadId);
+                                }
+                            });
                 }));
     }
 
@@ -65,8 +76,10 @@ public class ProposalManager {
                 String voteStr = yes ? "<green>YES</green>" : "<red>NO</red>";
                 broadcast("<yellow>" + voter.getName() + "</yellow> voted " + voteStr
                         + " on proposal <gold>#" + proposalId + "</gold>");
-                plugin.getDiscordWebhook().send(voter.getName() + " voted **" + (yes ? "YES" : "NO")
-                        + "** on proposal #" + proposalId);
+                String discordLine = voter.getName() + " voted **" + (yes ? "YES" : "NO")
+                        + "** on proposal #" + proposalId
+                        + " (Yes: " + p.getYesCount() + " | No: " + p.getNoCount() + ")";
+                plugin.getDiscordWebhook().postToThread(p.getDiscordThreadId(), discordLine);
                 plugin.getDatabaseManager().log(voter.getName() + " voted " + (yes ? "yes" : "no")
                         + " on #" + proposalId);
                 voter.sendMessage(MiniMessage.miniMessage().deserialize("<green>Vote recorded."));
@@ -91,6 +104,8 @@ public class ProposalManager {
                 plugin.getDatabaseManager().markProposalCancelled(proposalId);
                 broadcast("<yellow>" + player.getName() + "</yellow> cancelled proposal <gold>#"
                         + proposalId + "</gold>");
+                plugin.getDiscordWebhook().postToThread(p.getDiscordThreadId(),
+                        "❌ **" + player.getName() + "** cancelled proposal #" + proposalId);
                 plugin.getDatabaseManager().log(player.getName() + " cancelled proposal #" + proposalId);
                 player.sendMessage(MiniMessage.miniMessage().deserialize("<green>Proposal cancelled."));
             });
@@ -106,8 +121,8 @@ public class ProposalManager {
 
         String tally = "Yes: " + p.getYesCount() + " | No: " + p.getNoCount();
         broadcast("<green>Proposal #" + p.getId() + " PASSED</green> (" + tally + "): " + p.getDescription());
-        plugin.getDiscordWebhook().send("**Proposal #" + p.getId() + " PASSED**\n"
-                + p.getDescription() + "\n" + tally);
+        plugin.getDiscordWebhook().postToThread(p.getDiscordThreadId(),
+                "✅ **Proposal #" + p.getId() + " PASSED**\n" + p.getDescription() + "\n" + tally);
         plugin.getDatabaseManager().log("Proposal #" + p.getId() + " PASSED - " + p.getDescription());
     }
 
@@ -486,13 +501,13 @@ public class ProposalManager {
             }
         }
 
-        String keyNoUs = key.replace("_", "");
+        String keyNoUnderscore = key.replace("_", "");
 
         String best = null;
         int bestDist = Integer.MAX_VALUE;
         for (String candidate : allKnownGameruleNames()) {
             int d = levenshtein(key, candidate);
-            int d2 = levenshtein(keyNoUs, candidate.replace("_", ""));
+            int d2 = levenshtein(keyNoUnderscore, candidate.replace("_", ""));
             d = Math.min(d, d2);
             if (d < bestDist) {
                 bestDist = d;
