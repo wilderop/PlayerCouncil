@@ -23,7 +23,7 @@ public class ProposeCommand implements CommandExecutor {
         this.plugin = plugin;
     }
 
-    private record Pending(Proposal.Type type, String target, String value) {}
+    private record Pending(Proposal.Type type, String target, String value, String reason) {}
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
@@ -65,11 +65,11 @@ public class ProposeCommand implements CommandExecutor {
                                                 + "</yellow> hour(s) (cooldown after your ban was overturned)."));
                                 return;
                             }
-                            plugin.getProposalManager().createProposal(player, p.type(), p.target(), p.value());
+                            plugin.getProposalManager().createProposal(player, p.type(), p.target(), p.value(), p.reason());
                         }));
                 return true;
             }
-            plugin.getProposalManager().createProposal(player, p.type(), p.target(), p.value());
+            plugin.getProposalManager().createProposal(player, p.type(), p.target(), p.value(), p.reason());
             return true;
         }
 
@@ -99,7 +99,7 @@ public class ProposeCommand implements CommandExecutor {
                                 + "</yellow>/256). Shorten it and try again."));
                 return true;
             }
-            pending.put(player.getUniqueId(), new Pending(Proposal.Type.SUGGESTION, text, null));
+            pending.put(player.getUniqueId(), new Pending(Proposal.Type.SUGGESTION, text, null, null));
             player.sendMessage(mm.deserialize("<gold>Confirm proposal:</gold> <white>SUGGESTION → " + text));
             player.sendMessage(mm.deserialize(
                     "<gray>Advisory only — if it passes, it is recorded for the server admin (no auto action)."));
@@ -111,14 +111,23 @@ public class ProposeCommand implements CommandExecutor {
         // --- Automatic ban / unban ladder ---
         if (action.equals("ban") || action.equals("unban") || action.equals("pardon")) {
             if (args.length < 2) {
-                player.sendMessage(mm.deserialize("<red>Usage: /propose ban <player>  or  /propose unban <player>"));
+                player.sendMessage(mm.deserialize(
+                        "<red>Usage: /propose ban <player> [reason...]  or  /propose unban <player> [reason...]"));
                 return true;
             }
             boolean wantBan = action.equals("ban");
             String targetName = args[1];
+            String reason = args.length > 2
+                    ? String.join(" ", java.util.Arrays.copyOfRange(args, 2, args.length)).trim()
+                    : null;
+            if (reason != null && reason.isEmpty()) reason = null;
+            if (reason != null && reason.length() > 200) {
+                player.sendMessage(mm.deserialize("<red>Reason too long (max 200 characters)."));
+                return true;
+            }
 
             if (wantBan) {
-                // Cooldown after having your own ban overturned
+                final String reasonFinal = reason;
                 plugin.getDatabaseManager().getBanProposeCooldownAsync(player.getUniqueId()).thenAccept(until ->
                         plugin.getServer().getScheduler().runTask(plugin, () -> {
                             if (until > System.currentTimeMillis()) {
@@ -129,12 +138,12 @@ public class ProposeCommand implements CommandExecutor {
                                                 + "</yellow> hour(s) (cooldown after your ban was overturned)."));
                                 return;
                             }
-                            startBanLadder(player, targetName, true);
+                            startBanLadder(player, targetName, true, reasonFinal);
                         }));
                 return true;
             }
 
-            startBanLadder(player, targetName, false);
+            startBanLadder(player, targetName, false, reason);
             return true;
         }
 
@@ -148,7 +157,6 @@ public class ProposeCommand implements CommandExecutor {
             return true;
         }
 
-        // Redirect old BAN/PARDON/REBAN/REPARDON through the ladder for consistency
         if (type == Proposal.Type.BAN || type == Proposal.Type.REBAN
                 || type == Proposal.Type.PARDON || type == Proposal.Type.REPARDON) {
             if (args.length < 2) {
@@ -166,11 +174,17 @@ public class ProposeCommand implements CommandExecutor {
                                                 + "</yellow> hour(s)."));
                                 return;
                             }
-                            startBanLadder(player, args[1], true);
+                            String legReason = args.length > 2
+                                    ? String.join(" ", java.util.Arrays.copyOfRange(args, 2, args.length)).trim()
+                                    : null;
+                            startBanLadder(player, args[1], true, legReason);
                         }));
                 return true;
             }
-            startBanLadder(player, args[1], false);
+            String legReason = args.length > 2
+                    ? String.join(" ", java.util.Arrays.copyOfRange(args, 2, args.length)).trim()
+                    : null;
+            startBanLadder(player, args[1], false, legReason);
             return true;
         }
 
@@ -237,7 +251,7 @@ public class ProposeCommand implements CommandExecutor {
             }
         }
 
-        pending.put(player.getUniqueId(), new Pending(type, target, value));
+        pending.put(player.getUniqueId(), new Pending(type, target, value, null));
         player.sendMessage(mm.deserialize("<gold>Confirm proposal:</gold> <white>" + type.name()
                 + " → " + target + (value != null ? " = " + value : "")));
         player.sendMessage(mm.deserialize(
@@ -251,15 +265,15 @@ public class ProposeCommand implements CommandExecutor {
 
     private void sendUsage(Player player) {
         player.sendMessage(mm.deserialize("<gold>Proposal types:</gold>"));
-        player.sendMessage(mm.deserialize("  <yellow>/propose ban <player></yellow> <gray>— auto ladder"));
-        player.sendMessage(mm.deserialize("  <yellow>/propose unban <player></yellow> <gray>— auto ladder"));
+        player.sendMessage(mm.deserialize("  <yellow>/propose ban <player> [reason...]</yellow> <gray>— auto ladder"));
+        player.sendMessage(mm.deserialize("  <yellow>/propose unban <player> [reason...]</yellow> <gray>— auto ladder"));
         player.sendMessage(mm.deserialize("  <yellow>/propose suggestion <text></yellow> <gray>— advisory (max 256 chars)"));
         player.sendMessage(mm.deserialize("  <yellow>/propose GAMERULE <rule> <value></yellow> <gray>— all worlds"));
         player.sendMessage(mm.deserialize("  <yellow>/propose PLUGIN_ENABLE <plugin>"));
         player.sendMessage(mm.deserialize("  <yellow>/propose PLUGIN_DISABLE <plugin>"));
     }
 
-    private void startBanLadder(Player player, String targetName, boolean wantBan) {
+    private void startBanLadder(Player player, String targetName, boolean wantBan, String reason) {
         player.sendMessage(mm.deserialize("<gray>Resolving ban ladder for <white>" + targetName + "</white>..."));
         plugin.getBanVoteManager().resolveLadder(targetName, wantBan).thenAccept(res ->
                 plugin.getServer().getScheduler().runTask(plugin, () -> {
@@ -268,10 +282,13 @@ public class ProposeCommand implements CommandExecutor {
                         return;
                     }
                     pending.put(player.getUniqueId(), new Pending(
-                            res.type(), res.targetName(), String.valueOf(res.requiredVotes())));
+                            res.type(), res.targetName(), String.valueOf(res.requiredVotes()), reason));
                     player.sendMessage(mm.deserialize("<gold>Confirm proposal:</gold>"));
                     player.sendMessage(mm.deserialize("  <white>" + res.type().name() + " → " + res.targetName()));
                     player.sendMessage(mm.deserialize("  <gray>" + res.explanation()));
+                    if (reason != null && !reason.isBlank()) {
+                        player.sendMessage(mm.deserialize("  <gray>Reason: <white>" + reason));
+                    }
                     player.sendMessage(mm.deserialize("  <yellow>Needs <white>" + res.requiredVotes()
                             + "</white> yes votes to pass."));
                     player.sendMessage(mm.deserialize(
