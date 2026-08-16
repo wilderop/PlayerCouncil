@@ -1,10 +1,15 @@
 # PlayerCouncil Configuration
 
 council:
+  # Number of seats on the council
   size: 12
+  # Minimum total playtime in hours required to be eligible for council
   min-total-hours: 100
+  # Minimum number of filled council seats required before proposals/bans are allowed.
   min-active-members: 3
+  # Weekly council seat refresh (server local time)
   recalc-day: SUNDAY
+  # Hour 0-23 (midnight = 0)
   recalc-hour: 0
 
 activity:
@@ -22,8 +27,6 @@ activity:
       weight: 1.0
       scale: 1
 
-# Optional activity sidebar scoreboard (OFF by default).
-# When enabled, players opt in with /councilboard
 display:
   enabled: false
   refresh-seconds: 300
@@ -49,6 +52,13 @@ ban:
   provider: smartban
   ban-command: "ban {player} {reason}"
   unban-command: "unban {player} {reason}"
+
+# Automated ban review: when council members join, prompt about recent bans
+ban-review:
+  enabled: true
+  max-prompts-per-join: 5
+  lookback-days: 7
+  review-expire-days: 7
 
 discord:
   webhook-url: ""

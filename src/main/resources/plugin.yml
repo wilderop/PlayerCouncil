@@ -43,6 +43,10 @@ commands:
     description: Admin commands for the council system
     usage: /counciladmin <reload|recalc|setsize|whitelist>
     permission: playercouncil.admin
+  councilreview:
+    description: Respond to an automated ban review prompt
+    usage: /councilreview <banId> reaffirm|overturn
+    permission: playercouncil.council
 
 permissions:
   playercouncil.use:
