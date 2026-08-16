@@ -8,18 +8,20 @@ import org.bukkit.entity.Player;
 import org.bukkit.permissions.PermissionAttachment;
 
 import java.util.*;
-import java.util.concurrent.CompletableFuture;
 
 public class CouncilManager {
 
     private final PlayerCouncilPlugin plugin;
     private final Set<UUID> currentCouncil = Collections.synchronizedSet(new HashSet<>());
-    private final Map<UUID, PermissionAttachment> attachments = new HashMap<>();
+    private final Map<UUID, PermissionAttachment> attachments = new java.util.concurrent.ConcurrentHashMap<>();
 
     public CouncilManager(PlayerCouncilPlugin plugin) {
         this.plugin = plugin;
     }
 
+    /**
+     * Ranking runs fully async; council membership is applied on the main thread.
+     */
     public void recalculateCouncil() {
         int size = plugin.getConfig().getInt("council.size", 12);
         int minHours = plugin.getConfig().getInt("council.min-total-hours", 100);
@@ -36,21 +38,21 @@ public class CouncilManager {
 
     /**
      * Among accounts that have ever shared an IP, only the one with the most
-     * total playtime remains eligible for council. Others are dropped.
+     * total playtime remains eligible for council. Others are dropped from the ranking.
      */
-    private CompletableFuture<List<Map.Entry<UUID, Double>>> filterSharedIpAlts(
+    private java.util.concurrent.CompletableFuture<List<Map.Entry<UUID, Double>>> filterSharedIpAlts(
             List<Map.Entry<UUID, Double>> ranked) {
         if (ranked.isEmpty()) {
-            return CompletableFuture.completedFuture(ranked);
+            return java.util.concurrent.CompletableFuture.completedFuture(ranked);
         }
         List<UUID> uuids = ranked.stream().map(Map.Entry::getKey).toList();
         return plugin.getDatabaseManager().getIpRelatedGroupsAsync(uuids).thenCompose(related -> {
-            List<CompletableFuture<AbstractMap.SimpleEntry<UUID, Long>>> hourFutures = new ArrayList<>();
+            List<java.util.concurrent.CompletableFuture<AbstractMap.SimpleEntry<UUID, Long>>> hourFutures = new ArrayList<>();
             for (UUID u : uuids) {
                 hourFutures.add(plugin.getDatabaseManager().getTotalPlaytimeAsync(u)
                         .thenApply(h -> new AbstractMap.SimpleEntry<>(u, h)));
             }
-            return CompletableFuture.allOf(hourFutures.toArray(new CompletableFuture[0]))
+            return java.util.concurrent.CompletableFuture.allOf(hourFutures.toArray(new java.util.concurrent.CompletableFuture[0]))
                     .thenApply(v -> {
                         Map<UUID, Long> hours = new HashMap<>();
                         for (var f : hourFutures) {
@@ -92,10 +94,13 @@ public class CouncilManager {
         List<Map.Entry<UUID, String>> newCouncil = new ArrayList<>();
         Set<UUID> newSet = new HashSet<>();
 
+        Map<UUID, String> names = new HashMap<>();
+        // Names are best-effort from online/offline players
         for (int i = 0; i < Math.min(size, ranked.size()); i++) {
             UUID uuid = ranked.get(i).getKey();
             String name = Bukkit.getOfflinePlayer(uuid).getName();
             if (name == null) name = uuid.toString().substring(0, 8);
+            names.put(uuid, name);
             newCouncil.add(Map.entry(uuid, name));
             newSet.add(uuid);
         }
@@ -105,38 +110,71 @@ public class CouncilManager {
         Set<UUID> added = new HashSet<>(newSet);
         added.removeAll(currentCouncil);
 
+        // Update membership set first so isCouncilMember() is correct for any
+        // concurrent command checks while we touch permissions.
+        currentCouncil.clear();
+        currentCouncil.addAll(newSet);
+        plugin.getDatabaseManager().setCouncil(newCouncil);
+        plugin.getDatabaseManager().log("Council recalculated. New size: " + newCouncil.size());
+        plugin.getLogger().info("Council updated. Members: " + newCouncil.size());
+
         for (UUID uuid : removed) {
             Player p = Bukkit.getPlayer(uuid);
-            if (p != null) {
+            if (p != null && p.isOnline()) {
                 removeCouncilPermission(p);
                 p.sendMessage(mm("<gray>[<gold>Council</gold>]</gray> <red>You are no longer a council member."));
             }
         }
         for (UUID uuid : added) {
             Player p = Bukkit.getPlayer(uuid);
-            if (p != null) {
+            if (p != null && p.isOnline()) {
                 grantCouncilPermission(p);
                 p.sendMessage(mm("<gray>[<gold>Council</gold>]</gray> <green>You have been appointed to the Player Council!"));
             }
         }
-
-        currentCouncil.clear();
-        currentCouncil.addAll(newSet);
-        plugin.getDatabaseManager().setCouncil(newCouncil);
-        plugin.getDatabaseManager().log("Council recalculated. New size: " + newCouncil.size());
-        plugin.getLogger().info("Council updated. Members: " + newCouncil.size());
+        // Re-sync permissions for members who stayed on the council (heals
+        // missing attachments after reloads / race with async loadFromDatabase).
+        for (UUID uuid : newSet) {
+            if (added.contains(uuid) || removed.contains(uuid)) continue;
+            Player p = Bukkit.getPlayer(uuid);
+            if (p != null && p.isOnline()) {
+                grantCouncilPermission(p);
+            }
+        }
     }
 
+    /**
+     * Grant {@code playercouncil.council} and refresh the client's command tree
+     * so /propose and related commands become usable immediately while online.
+     */
     public void grantCouncilPermission(Player player) {
+        // Idempotent: drop any prior attachment we own for this player first.
+        removeCouncilPermission(player);
         PermissionAttachment att = player.addAttachment(plugin);
         att.setPermission("playercouncil.council", true);
         attachments.put(player.getUniqueId(), att);
+        player.recalculatePermissions();
+        // Paper: push updated Brigadier command list so the client sees /propose etc.
+        try {
+            player.updateCommands();
+        } catch (NoSuchMethodError | Exception ignored) {
+            // Older forks without updateCommands
+        }
     }
 
     public void removeCouncilPermission(Player player) {
         PermissionAttachment att = attachments.remove(player.getUniqueId());
         if (att != null) {
-            player.removeAttachment(att);
+            try {
+                player.removeAttachment(att);
+            } catch (IllegalArgumentException ignored) {
+                // Attachment already gone (e.g. after a soft reload)
+            }
+        }
+        player.recalculatePermissions();
+        try {
+            player.updateCommands();
+        } catch (NoSuchMethodError | Exception ignored) {
         }
     }
 
@@ -145,10 +183,18 @@ public class CouncilManager {
     }
 
     public void loadFromDatabase() {
-        plugin.getDatabaseManager().getCouncilUuidsAsync().thenAccept(list -> {
-            currentCouncil.clear();
-            currentCouncil.addAll(list);
-        });
+        plugin.getDatabaseManager().getCouncilUuidsAsync().thenAccept(list ->
+                Bukkit.getScheduler().runTask(plugin, () -> {
+                    currentCouncil.clear();
+                    currentCouncil.addAll(list);
+                    // After a reload (or delayed load), online members need attachments now.
+                    for (UUID uuid : list) {
+                        Player p = Bukkit.getPlayer(uuid);
+                        if (p != null && p.isOnline()) {
+                            grantCouncilPermission(p);
+                        }
+                    }
+                }));
     }
 
     public List<UUID> getCouncilMembers() {
@@ -164,6 +210,7 @@ public class CouncilManager {
         return plugin.getConfig().getInt("council.min-active-members", 3);
     }
 
+    /** Immediately drop a banned player from the council. */
     public void removeMember(UUID uuid) {
         currentCouncil.remove(uuid);
         plugin.getDatabaseManager().removeCouncilMember(uuid);
