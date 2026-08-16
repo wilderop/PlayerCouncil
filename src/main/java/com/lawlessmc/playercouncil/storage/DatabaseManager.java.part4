@@ -1,1 +1,15 @@
-WILL_LOAD
+        return new TrackedBan(
+                rs.getInt("id"),
+                UUID.fromString(rs.getString("target_uuid")),
+                rs.getString("target_name"),
+                rs.getString("reason"),
+                rs.getString("source"),
+                byUuid != null && !byUuid.isBlank() ? UUID.fromString(byUuid) : null,
+                rs.getString("banned_by_name"),
+                rs.getLong("banned_at"),
+                firstNull ? null : first,
+                rs.getInt("active") == 1
+        );
+    }
+
+}
