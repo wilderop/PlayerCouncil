@@ -20,6 +20,7 @@ public class PlayerCouncilPlugin extends JavaPlugin {
     private CouncilManager councilManager;
     private ProposalManager proposalManager;
     private BanVoteManager banVoteManager;
+    private BanReviewManager banReviewManager;
     private DisplayManager displayManager;
     private DiscordWebhook discordWebhook;
     private TrackedStats trackedStats;
@@ -36,12 +37,14 @@ public class PlayerCouncilPlugin extends JavaPlugin {
         this.councilManager = new CouncilManager(this);
         this.proposalManager = new ProposalManager(this);
         this.banVoteManager = new BanVoteManager(this);
+        this.banReviewManager = new BanReviewManager(this);
         this.displayManager = new DisplayManager(this);
         this.discordWebhook = new DiscordWebhook(this);
         this.trackedStats = new TrackedStats(this);
 
         registerCommands();
         getServer().getPluginManager().registerEvents(new PlayerListener(this), this);
+        getServer().getPluginManager().registerEvents(new com.lawlessmc.playercouncil.listeners.BanListener(this), this);
         this.displayManager.start();
 
         getServer().getScheduler().runTaskLater(this, () -> {
@@ -88,6 +91,9 @@ public class PlayerCouncilPlugin extends JavaPlugin {
         getCommand("counciladmin").setExecutor(new CouncilAdminCommand(this));
         if (getCommand("councilboard") != null) {
             getCommand("councilboard").setExecutor(new CouncilBoardCommand(this));
+        }
+        if (getCommand("councilreview") != null) {
+            getCommand("councilreview").setExecutor(new CouncilReviewCommand(this));
         }
     }
 
@@ -154,6 +160,10 @@ public class PlayerCouncilPlugin extends JavaPlugin {
 
     public BanVoteManager getBanVoteManager() {
         return banVoteManager;
+    }
+
+    public BanReviewManager getBanReviewManager() {
+        return banReviewManager;
     }
 
     public DisplayManager getDisplayManager() {
