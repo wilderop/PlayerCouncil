@@ -30,6 +30,7 @@ public class BanListener implements Listener {
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onKick(PlayerKickEvent event) {
         Player player = event.getPlayer();
+        // After this tick, check whether they are name-banned
         Bukkit.getScheduler().runTask(plugin, () -> {
             if (isNameBanned(player.getName())) {
                 String reason = null;
@@ -66,6 +67,7 @@ public class BanListener implements Listener {
         String[] parts = raw.trim().split("\\s+");
         if (parts.length < 2) return;
         String cmd = parts[0].toLowerCase(Locale.ROOT);
+        // strip leading plugin: namespace if present
         int colon = cmd.indexOf(':');
         if (colon >= 0) cmd = cmd.substring(colon + 1);
 
@@ -81,6 +83,7 @@ public class BanListener implements Listener {
         UUID targetUuid = off.getUniqueId();
 
         if (isUnban) {
+            // Defer slightly so the ban plugin can process
             Bukkit.getScheduler().runTaskLater(plugin, () ->
                     plugin.getBanReviewManager().recordUnban(targetUuid, targetName), 5L);
             return;
@@ -90,13 +93,25 @@ public class BanListener implements Listener {
                 ? String.join(" ", java.util.Arrays.copyOfRange(parts, 2, parts.length))
                 : null;
         Bukkit.getScheduler().runTaskLater(plugin, () -> {
-            plugin.getBanReviewManager().recordBan(
-                    targetUuid,
-                    off.getName() != null ? off.getName() : targetName,
-                    reason,
-                    "command",
-                    actorUuid,
-                    actorName);
+            // Confirm they ended up banned (SmartBan / vanilla)
+            if (isNameBanned(targetName) || isNameBanned(off.getName())) {
+                plugin.getBanReviewManager().recordBan(
+                        targetUuid,
+                        off.getName() != null ? off.getName() : targetName,
+                        reason,
+                        "command",
+                        actorUuid,
+                        actorName);
+            } else {
+                // Still record — SmartBan may delay writing to Bukkit BanList
+                plugin.getBanReviewManager().recordBan(
+                        targetUuid,
+                        off.getName() != null ? off.getName() : targetName,
+                        reason,
+                        "command",
+                        actorUuid,
+                        actorName);
+            }
         }, 5L);
     }
 
