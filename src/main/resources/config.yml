@@ -6,20 +6,26 @@ council:
   # Minimum total playtime in hours required to be eligible for council
   min-total-hours: 100
   # Minimum number of filled council seats required before proposals/bans are allowed.
+  # Until this many members exist, the voting system stays inactive.
   min-active-members: 3
   # Weekly council seat refresh (server local time)
+  # Day of week: MONDAY..SUNDAY
   recalc-day: SUNDAY
   # Hour 0-23 (midnight = 0)
   recalc-hour: 0
 
 activity:
+  # Vanilla UNTYPED statistics used for activity scoring.
+  # score contribution = weight * (delta / scale)
+  # Only Statistic.Type.UNTYPED values work (no per-block / per-entity stats).
+  # Manage in-game: /counciladmin stat list|add|remove|setweight|setscale
   tracked-stats:
     - stat: PLAY_ONE_MINUTE
       weight: 1.0
-      scale: 72000
+      scale: 72000      # ticks → hours
     - stat: WALK_ONE_CM
       weight: 1.0
-      scale: 100000
+      scale: 100000     # cm → km
     - stat: AVIATE_ONE_CM
       weight: 1.0
       scale: 100000
@@ -27,6 +33,8 @@ activity:
       weight: 1.0
       scale: 1
 
+# Optional activity sidebar scoreboard (OFF by default).
+# When enabled, players opt in with /councilboard
 display:
   enabled: false
   refresh-seconds: 300
@@ -34,40 +42,59 @@ display:
   title: "Council Race"
 
 voting:
+  # First ban of a NEW player (< veteran-hours): this many yes votes
   ban-new: 1
+  # First ban of a VETERAN (>= veteran-hours): this many yes votes
   ban-veteran: 2
+  # Total hours that separates new vs veteran for ban threshold
   veteran-hours: 100
   pardon: 2
   reban: 4
   repardon: 8
+  # Votes to ban a sitting council member OR any account that has shared an IP
+  # with a sitting council member (alt protection). Defaults to 8.
   council-ban: 8
   gamerule: 8
   plugin: 8
+  # Advisory suggestion proposals (text only, no auto action)
   suggestion: 8
   proposal-timeout-days: 7
   restart-warning-minutes: 10
+  # After a ban on you is overturned, you cannot propose bans for this many days
   ban-cooldown-days: 7
 
+# How council ban/unban commands are executed
 ban:
+  # smartban = incremental SmartBan plugin | vanilla = Minecraft /ban /pardon
   provider: smartban
+  # {player} and {reason} are substituted
   ban-command: "ban {player} {reason}"
+  # SmartBan requires a reason on unban
   unban-command: "unban {player} {reason}"
 
 # Automated ban review: when council members join, prompt about recent bans
 ban-review:
   enabled: true
+  # Max review prompts shown per council join
   max-prompts-per-join: 5
+  # Only consider bans issued within this many days
   lookback-days: 7
+  # Review offers expire this many days after the ban was first prompted to anyone
   review-expire-days: 7
 
 discord:
+  # Optional incoming webhook (fallback announces if bot is not configured)
   webhook-url: ""
   username: "Player Council"
+  # Bot token — used to create a thread per proposal and post vote updates
   bot-token: ""
+  # Channel ID where proposal threads are created (text or forum channel)
   proposals-channel-id: ""
+  # true if proposals-channel-id is a Forum channel
   use-forum: false
 
 plugins:
+  # Plugins the council may enable/disable
   whitelist: []
 
 messages:

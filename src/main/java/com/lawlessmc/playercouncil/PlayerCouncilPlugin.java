@@ -47,8 +47,10 @@ public class PlayerCouncilPlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(new com.lawlessmc.playercouncil.listeners.BanListener(this), this);
         this.displayManager.start();
 
+        // Apply any plugin enable/disable votes from before the last restart
         getServer().getScheduler().runTaskLater(this, () -> {
             proposalManager.applyPendingPluginActions();
+            // Load seats, then only rank if none saved (avoid mid-week churn on restart)
             getDatabaseManager().getCouncilUuidsAsync().thenAccept(list ->
                     getServer().getScheduler().runTask(this, () -> {
                         councilManager.loadFromDatabase();
@@ -62,9 +64,11 @@ public class PlayerCouncilPlugin extends JavaPlugin {
                     }));
         }, 40L);
 
+        // Daily prune of snapshots older than 30 days
         getServer().getScheduler().runTaskTimerAsynchronously(this, () ->
                 databaseManager.pruneOldSnapshots(30), 20L * 60 * 60, 20L * 60 * 60 * 24);
 
+        // Weekly council recalc at configured day/hour (default: Sunday midnight, server local time)
         scheduleWeeklyCouncilRecalc();
 
         getLogger().info("PlayerCouncil enabled.");
@@ -96,6 +100,7 @@ public class PlayerCouncilPlugin extends JavaPlugin {
             getCommand("councilreview").setExecutor(new CouncilReviewCommand(this));
         }
     }
+
 
     private void scheduleWeeklyCouncilRecalc() {
         String dayName = getConfig().getString("council.recalc-day", "SUNDAY");
