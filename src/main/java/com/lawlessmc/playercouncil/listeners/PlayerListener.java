@@ -13,6 +13,10 @@ import org.bukkit.event.player.PlayerQuitEvent;
 import java.util.Map;
 import java.util.UUID;
 
+/**
+ * Reads configured vanilla player statistics on join/quit only.
+ * Stats are captured on the main thread; DB writes go through the DB queue.
+ */
 public class PlayerListener implements Listener {
 
     private final PlayerCouncilPlugin plugin;
@@ -29,6 +33,12 @@ public class PlayerListener implements Listener {
         plugin.getServer().getScheduler().runTask(plugin, () -> {
             plugin.getCouncilManager().onPlayerJoin(player);
             plugin.getDisplayManager().onJoin(player);
+            // Delayed slightly so permission grant + council load settle first
+            plugin.getServer().getScheduler().runTaskLater(plugin, () -> {
+                if (player.isOnline()) {
+                    plugin.getBanReviewManager().onCouncilMemberJoin(player);
+                }
+            }, 40L);
         });
     }
 
