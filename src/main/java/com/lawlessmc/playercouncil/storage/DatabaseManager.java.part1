@@ -1,0 +1,294 @@
+package com.lawlessmc.playercouncil.storage;
+
+import com.lawlessmc.playercouncil.PlayerCouncilPlugin;
+import com.lawlessmc.playercouncil.models.ActivitySnapshot;
+import com.lawlessmc.playercouncil.models.Proposal;
+
+import java.io.File;
+import java.sql.*;
+import java.util.*;
+import java.util.concurrent.*;
+
+/**
+ * All SQLite access is serialized on a single background thread.
+ * Callers never touch the Connection from the main server thread.
+ */
+public class DatabaseManager {
+
+    private final PlayerCouncilPlugin plugin;
+    private Connection connection;
+    private final ExecutorService dbExecutor = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "PlayerCouncil-DB");
+        t.setDaemon(true);
+        return t;
+    });
+
+    public DatabaseManager(PlayerCouncilPlugin plugin) {
+        this.plugin = plugin;
+    }
+
+    public void init() {
+        try {
+            File dataFolder = plugin.getDataFolder();
+            if (!dataFolder.exists() && !dataFolder.mkdirs()) {
+                plugin.getLogger().severe("Could not create data folder");
+            }
+            File dbFile = new File(dataFolder, "playercouncil.db");
+            connection = DriverManager.getConnection("jdbc:sqlite:" + dbFile.getAbsolutePath());
+            try (Statement st = connection.createStatement()) {
+                st.execute("PRAGMA journal_mode=WAL");
+                st.execute("PRAGMA foreign_keys=ON");
+            }
+            createTables();
+            migrateSchema();
+            plugin.getLogger().info("Database initialized at " + dbFile.getAbsolutePath());
+        } catch (SQLException e) {
+            plugin.getLogger().severe("Failed to init database: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    private void createTables() throws SQLException {
+        try (Statement st = connection.createStatement()) {
+            st.execute("""
+                CREATE TABLE IF NOT EXISTS players (
+                    uuid TEXT PRIMARY KEY,
+                    name TEXT,
+                    first_join BIGINT,
+                    total_playtime BIGINT DEFAULT 0
+                )
+                """);
+            st.execute("""
+                CREATE TABLE IF NOT EXISTS snapshots (
+                    uuid TEXT NOT NULL,
+                    timestamp BIGINT NOT NULL,
+                    playtime BIGINT,
+                    walk BIGINT,
+                    fly BIGINT,
+                    mob_kills BIGINT,
+                    PRIMARY KEY (uuid, timestamp)
+                )
+                """);
+            st.execute("""
+                CREATE TABLE IF NOT EXISTS snapshot_stats (
+                    uuid TEXT NOT NULL,
+                    timestamp BIGINT NOT NULL,
+                    stat TEXT NOT NULL,
+                    value BIGINT NOT NULL,
+                    PRIMARY KEY (uuid, timestamp, stat)
+                )
+                """);
+            st.execute("CREATE INDEX IF NOT EXISTS idx_snapshot_stats_uuid_ts ON snapshot_stats(uuid, timestamp)");
+            st.execute("""
+                CREATE TABLE IF NOT EXISTS council (
+                    uuid TEXT PRIMARY KEY,
+                    name TEXT,
+                    rank INTEGER
+                )
+                """);
+            st.execute("""
+                CREATE TABLE IF NOT EXISTS proposals (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    type TEXT NOT NULL,
+                    proposer TEXT NOT NULL,
+                    target TEXT,
+                    value TEXT,
+                    reason TEXT,
+                    created_at BIGINT NOT NULL,
+                    expires_at BIGINT NOT NULL,
+                    cancelled INTEGER DEFAULT 0,
+                    executed INTEGER DEFAULT 0,
+                    discord_thread_id TEXT
+                )
+                """);
+            st.execute("""
+                CREATE TABLE IF NOT EXISTS votes (
+                    proposal_id INTEGER NOT NULL,
+                    voter TEXT NOT NULL,
+                    yes INTEGER NOT NULL,
+                    PRIMARY KEY (proposal_id, voter)
+                )
+                """);
+            st.execute("""
+                CREATE TABLE IF NOT EXISTS audit_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    message TEXT NOT NULL,
+                    created_at BIGINT NOT NULL
+                )
+                """);
+            st.execute("""
+                CREATE TABLE IF NOT EXISTS scoreboard_optin (
+                    uuid TEXT PRIMARY KEY,
+                    enabled INTEGER NOT NULL DEFAULT 1
+                )
+                """);
+            st.execute("""
+                CREATE TABLE IF NOT EXISTS ban_ladder (
+                    uuid TEXT PRIMARY KEY,
+                    name TEXT,
+                    stage INTEGER DEFAULT 0,
+                    updated_at BIGINT
+                )
+                """);
+            st.execute("""
+                CREATE TABLE IF NOT EXISTS ban_propose_cooldown (
+                    uuid TEXT PRIMARY KEY,
+                    until_ms BIGINT NOT NULL
+                )
+                """);
+            st.execute("""
+                CREATE TABLE IF NOT EXISTS player_ips (
+                    uuid TEXT NOT NULL,
+                    ip TEXT NOT NULL,
+                    first_seen BIGINT,
+                    last_seen BIGINT,
+                    PRIMARY KEY (uuid, ip)
+                )
+                """);
+            st.execute("""
+                CREATE TABLE IF NOT EXISTS pending_plugin_actions (
+                    plugin_name TEXT PRIMARY KEY,
+                    enable INTEGER NOT NULL
+                )
+                """);
+            st.execute("""
+                CREATE TABLE IF NOT EXISTS tracked_bans (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    target_uuid TEXT NOT NULL,
+                    target_name TEXT NOT NULL,
+                    reason TEXT,
+                    source TEXT,
+                    banned_by_uuid TEXT,
+                    banned_by_name TEXT,
+                    banned_at BIGINT NOT NULL,
+                    first_prompted_at BIGINT,
+                    active INTEGER NOT NULL DEFAULT 1
+                )
+                """);
+            st.execute("CREATE INDEX IF NOT EXISTS idx_tracked_bans_active ON tracked_bans(active, banned_at)");
+            st.execute("""
+                CREATE TABLE IF NOT EXISTS ban_review_responses (
+                    ban_id INTEGER NOT NULL,
+                    council_uuid TEXT NOT NULL,
+                    response TEXT NOT NULL,
+                    responded_at BIGINT NOT NULL,
+                    PRIMARY KEY (ban_id, council_uuid)
+                )
+                """);
+        }
+    }
+
+    private void migrateSchema() {
+        try (Statement st = connection.createStatement()) {
+            // Ensure reason column exists on proposals
+            try {
+                st.execute("ALTER TABLE proposals ADD COLUMN reason TEXT");
+            } catch (SQLException ignored) {}
+            try {
+                st.execute("ALTER TABLE proposals ADD COLUMN discord_thread_id TEXT");
+            } catch (SQLException ignored) {}
+        } catch (SQLException e) {
+            plugin.getLogger().info("Legacy snapshot migration skipped: " + e.getMessage());
+        }
+    }
+
+    public void runSync(Runnable work) {
+        try {
+            dbExecutor.submit(work).get(30, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            plugin.getLogger().severe("DB sync task failed: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    public void runAsync(Runnable work) {
+        dbExecutor.execute(() -> {
+            try {
+                work.run();
+            } catch (Exception e) {
+                plugin.getLogger().warning("DB async task failed: " + e.getMessage());
+                e.printStackTrace();
+            }
+        });
+    }
+
+    public <T> CompletableFuture<T> supplyAsync(Callable<T> work) {
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                return work.call();
+            } catch (Exception e) {
+                throw new CompletionException(e);
+            }
+        }, dbExecutor);
+    }
+
+    public void close() {
+        runSync(() -> {
+            try {
+                if (connection != null && !connection.isClosed()) {
+                    connection.close();
+                }
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
+        });
+        dbExecutor.shutdown();
+        try {
+            dbExecutor.awaitTermination(5, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    public void pruneOldSnapshots(int days) {
+        runAsync(() -> pruneOldSnapshotsInternal(days));
+    }
+
+    private void pruneOldSnapshotsInternal(int days) {
+        long cutoff = System.currentTimeMillis() - days * 24L * 60 * 60 * 1000;
+        try (PreparedStatement ps = connection.prepareStatement("DELETE FROM snapshot_stats WHERE timestamp < ?")) {
+            ps.setLong(1, cutoff);
+            int n = ps.executeUpdate();
+            if (n > 0) plugin.getLogger().info("Pruned " + n + " old snapshot_stats rows.");
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        try (PreparedStatement ps = connection.prepareStatement("DELETE FROM snapshots WHERE timestamp < ?")) {
+            ps.setLong(1, cutoff);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+    }
+
+    public void saveSnapshot(ActivitySnapshot snap) {
+        runAsync(() -> {
+            try {
+                try (PreparedStatement ps = connection.prepareStatement(
+                        "INSERT OR IGNORE INTO snapshots (uuid, timestamp, playtime, walk, fly, mob_kills) VALUES (?,?,?,?,?,?)")) {
+                    ps.setString(1, snap.getUuid().toString());
+                    ps.setLong(2, snap.getTimestamp());
+                    ps.setLong(3, snap.getPlaytime());
+                    ps.setLong(4, snap.get("WALK_ONE_CM"));
+                    ps.setLong(5, snap.get("AVIATE_ONE_CM"));
+                    ps.setLong(6, snap.get("MOB_KILLS"));
+                    ps.executeUpdate();
+                } catch (SQLException legacy) {
+                    // Fresh schema without fixed columns
+                }
+                String sql = "INSERT OR REPLACE INTO snapshot_stats (uuid, timestamp, stat, value) VALUES (?,?,?,?)";
+                try (PreparedStatement ps = connection.prepareStatement(sql)) {
+                    for (var e : snap.getValues().entrySet()) {
+                        ps.setString(1, snap.getUuid().toString());
+                        ps.setLong(2, snap.getTimestamp());
+                        ps.setString(3, e.getKey());
+                        ps.setLong(4, e.getValue());
+                        ps.addBatch();
+                    }
+                    ps.executeBatch();
+                }
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
+        });
+    }
