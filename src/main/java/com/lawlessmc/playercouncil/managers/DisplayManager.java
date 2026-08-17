@@ -50,11 +50,10 @@ public class DisplayManager {
             Bukkit.getScheduler().cancelTask(taskId);
             taskId = -1;
         }
-        Bukkit.getScheduler().runTask(plugin, () -> {
-            for (Player p : Bukkit.getOnlinePlayers()) {
-                clearBoard(p);
-            }
-        });
+        // onDisable runs on the main thread; never schedule tasks while the plugin is disabled
+        for (Player p : Bukkit.getOnlinePlayers()) {
+            clearBoard(p);
+        }
     }
 
     public boolean isFeatureEnabled() {
