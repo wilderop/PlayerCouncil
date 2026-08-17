@@ -55,15 +55,17 @@ public class DatabaseManager {
             st.execute("CREATE TABLE IF NOT EXISTS pending_plugin_actions (plugin_name TEXT PRIMARY KEY, enable INTEGER NOT NULL)");
             st.execute("CREATE TABLE IF NOT EXISTS ban_ladder (uuid TEXT PRIMARY KEY, name TEXT, stage INTEGER NOT NULL DEFAULT 0)");
             st.execute("CREATE TABLE IF NOT EXISTS snapshot_stats (uuid TEXT NOT NULL, timestamp INTEGER NOT NULL, stat TEXT NOT NULL, value INTEGER NOT NULL, PRIMARY KEY (uuid, timestamp, stat))");
-            // Ban review tables
             st.execute("CREATE TABLE IF NOT EXISTS scoreboard_optin (uuid TEXT PRIMARY KEY, enabled INTEGER NOT NULL DEFAULT 1)");
             st.execute("CREATE TABLE IF NOT EXISTS ban_propose_cooldown (uuid TEXT PRIMARY KEY, until_ms BIGINT NOT NULL)");
             st.execute("CREATE TABLE IF NOT EXISTS player_ips (uuid TEXT NOT NULL, ip TEXT NOT NULL, first_seen BIGINT, last_seen BIGINT, PRIMARY KEY (uuid, ip))");
             st.execute("CREATE TABLE IF NOT EXISTS tracked_bans (id INTEGER PRIMARY KEY AUTOINCREMENT, target_uuid TEXT NOT NULL, target_name TEXT NOT NULL, reason TEXT, source TEXT, banned_by_uuid TEXT, banned_by_name TEXT, banned_at BIGINT NOT NULL, first_prompted_at BIGINT, active INTEGER NOT NULL DEFAULT 1)");
             st.execute("CREATE INDEX IF NOT EXISTS idx_tracked_bans_active ON tracked_bans(active, banned_at)");
             st.execute("CREATE TABLE IF NOT EXISTS ban_review_responses (ban_id INTEGER NOT NULL, council_uuid TEXT NOT NULL, response TEXT NOT NULL, responded_at BIGINT NOT NULL, PRIMARY KEY (ban_id, council_uuid))");
+            // Migrations for tables created by older plugin versions
             try { st.execute("ALTER TABLE proposals ADD COLUMN reason TEXT"); } catch (SQLException ignored) {}
             try { st.execute("ALTER TABLE proposals ADD COLUMN discord_thread_id TEXT"); } catch (SQLException ignored) {}
+            try { st.execute("ALTER TABLE player_ips ADD COLUMN first_seen INTEGER"); } catch (SQLException ignored) {}
+            try { st.execute("ALTER TABLE player_ips ADD COLUMN last_seen INTEGER"); } catch (SQLException ignored) {}
             migrateLegacySnapshots(st);
         }
     }
@@ -466,7 +468,6 @@ public class DatabaseManager {
         });
     }
 
-    // ---- Scoreboard opt-in ----
     public void setScoreboardOptIn(UUID uuid, boolean on) {
         runAsync(() -> {
             try (PreparedStatement ps = connection.prepareStatement(
@@ -498,7 +499,6 @@ public class DatabaseManager {
         });
     }
 
-    // ---- Ban propose cooldown ----
     public void setBanProposeCooldown(UUID uuid, long untilMs) {
         runAsync(() -> {
             try (PreparedStatement ps = connection.prepareStatement(
@@ -519,13 +519,14 @@ public class DatabaseManager {
         });
     }
 
-    // ---- Player IPs ----
     public void recordPlayerIp(UUID uuid, String ip) {
+        if (ip == null || ip.isBlank()) return;
+        String clean = ip.startsWith("/") ? ip.substring(1) : ip;
         long now = System.currentTimeMillis();
         runAsync(() -> {
             try (PreparedStatement ps = connection.prepareStatement(
                     "INSERT INTO player_ips (uuid, ip, first_seen, last_seen) VALUES (?,?,?,?) ON CONFLICT(uuid, ip) DO UPDATE SET last_seen = excluded.last_seen")) {
-                ps.setString(1, uuid.toString()); ps.setString(2, ip);
+                ps.setString(1, uuid.toString()); ps.setString(2, clean);
                 ps.setLong(3, now); ps.setLong(4, now); ps.executeUpdate();
             } catch (SQLException e) { e.printStackTrace(); }
         });
@@ -558,7 +559,6 @@ public class DatabaseManager {
         });
     }
 
-    // ---- Tracked bans (ban review) ----
     public record TrackedBan(
             int id, UUID targetUuid, String targetName, String reason, String source,
             UUID bannedByUuid, String bannedByName, long bannedAt, Long firstPromptedAt, boolean active) {}
