@@ -1,3 +1,6 @@
+<!-- azpbmd-live -->
+**Live:** survival
+<!-- /azpbmd-live -->
 # PlayerCouncil
 
 Paper plugin that ranks players by real activity metrics and forms a **Player Council** with democratic voting powers.
