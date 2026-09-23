@@ -5,7 +5,8 @@ import net.kyori.adventure.text.minimessage.MiniMessage;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
-import org.bukkit.entity.Player;
+
+import java.util.UUID;
 
 public class VoteCommand implements CommandExecutor {
 
@@ -18,24 +19,26 @@ public class VoteCommand implements CommandExecutor {
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-        if (!(sender instanceof Player player)) {
+        UUID actor = com.lawlessmc.playercouncil.bridge.Actors.uuid(sender);
+        if (actor == null) {
             sender.sendMessage("Players only.");
             return true;
         }
-        if (!plugin.getCouncilManager().isCouncilMember(player.getUniqueId())) {
-            player.sendMessage(mm.deserialize("<red>Only council members can vote."));
+        String actorName = com.lawlessmc.playercouncil.bridge.Actors.name(sender);
+        if (!plugin.getCouncilManager().isCouncilMember(actor)) {
+            sender.sendMessage(mm.deserialize("<red>Only council members can vote."));
             return true;
         }
         if (!plugin.getCouncilManager().isSystemActive()) {
             int need = plugin.getCouncilManager().getMinActiveMembers();
             int have = plugin.getCouncilManager().getCouncilMembers().size();
-            player.sendMessage(mm.deserialize(
+            sender.sendMessage(mm.deserialize(
                     "<red>Council voting is not active yet. Need at least <yellow>" + need +
                     "</yellow> members (currently <yellow>" + have + "</yellow>)."));
             return true;
         }
         if (args.length < 2) {
-            player.sendMessage(mm.deserialize("<red>Usage: /councilvote <id> <yes|no>"));
+            sender.sendMessage(mm.deserialize("<red>Usage: /councilvote <id> <yes|no>"));
             return true;
         }
 
@@ -43,7 +46,7 @@ public class VoteCommand implements CommandExecutor {
         try {
             id = Integer.parseInt(args[0]);
         } catch (NumberFormatException e) {
-            player.sendMessage(mm.deserialize("<red>Invalid proposal id."));
+            sender.sendMessage(mm.deserialize("<red>Invalid proposal id."));
             return true;
         }
 
@@ -54,11 +57,11 @@ public class VoteCommand implements CommandExecutor {
         } else if (v.equals("no") || v.equals("n") || v.equals("false") || v.equals("0")) {
             yes = false;
         } else {
-            player.sendMessage(mm.deserialize("<red>Vote must be yes or no."));
+            sender.sendMessage(mm.deserialize("<red>Vote must be yes or no."));
             return true;
         }
 
-        plugin.getProposalManager().vote(player, id, yes);
+        plugin.getProposalManager().vote(sender, actor, actorName, id, yes);
         return true;
     }
 }

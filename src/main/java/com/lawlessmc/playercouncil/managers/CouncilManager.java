@@ -130,8 +130,10 @@ public class CouncilManager {
             if (p != null && p.isOnline()) {
                 grantCouncilPermission(p);
                 p.sendMessage(mm("<gray>[<gold>Council</gold>]</gray> <green>You have been appointed to the Player Council!"));
+                p.sendMessage(mm("<gray>Type <yellow>/council link</yellow> to join the private council Discord."));
             }
         }
+        plugin.getDiscordLinkManager().onCouncilChanged(added, removed);
         // Re-sync permissions for members who stayed on the council (heals
         // missing attachments after reloads / race with async loadFromDatabase).
         for (UUID uuid : newSet) {
@@ -218,17 +220,25 @@ public class CouncilManager {
         if (p != null) {
             removeCouncilPermission(p);
         }
+        plugin.getDiscordLinkManager().onRemoved(uuid);
     }
 
     public void onPlayerJoin(Player player) {
         if (isCouncilMember(player.getUniqueId())) {
             grantCouncilPermission(player);
             player.sendMessage(mm("<gray>[<gold>Council</gold>]</gray> <green>You are currently a council member."));
+            player.sendMessage(mm("<gray>Type <yellow>/councilweb</yellow> for a one-time council-panel link."));
             if (isSystemActive()) {
                 player.sendMessage(mm("<gray>Type <yellow>/proposals</yellow> to see active proposals."));
             } else {
                 player.sendMessage(mm("<gray>Council voting is not active yet (need " + getMinActiveMembers() + " members)."));
             }
+            // After join spam so the Discord prompt is visible every login until linked.
+            plugin.getServer().getScheduler().runTaskLater(plugin, () -> {
+                if (player.isOnline() && isCouncilMember(player.getUniqueId())) {
+                    plugin.getDiscordLinkManager().promptUnlinkedOnJoin(player);
+                }
+            }, 80L);
         }
     }
 

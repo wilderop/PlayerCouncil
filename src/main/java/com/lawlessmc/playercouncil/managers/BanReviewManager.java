@@ -12,6 +12,7 @@ import net.kyori.adventure.text.minimessage.MiniMessage;
 import org.bukkit.Bukkit;
 import org.bukkit.BanList;
 import org.bukkit.OfflinePlayer;
+import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 
 import java.util.Date;
@@ -146,7 +147,7 @@ public class BanReviewManager {
         String reason = ban.reason() != null && !ban.reason().isBlank()
                 ? ban.reason() : "(no reason recorded)";
         String by = ban.bannedByName() != null && !ban.bannedByName().isBlank()
-                ? ban.bannedByName() : "unknown / staff";
+                ? ban.bannedByName() : "unknown / console";
         String source = ban.source() != null ? ban.source() : "unknown";
 
         player.sendMessage(mm.deserialize(
@@ -184,90 +185,94 @@ public class BanReviewManager {
     }
 
     public void handleResponse(Player player, int banId, String action) {
+        handleResponse(player, player.getUniqueId(), player.getName(), banId, action);
+    }
+
+    public void handleResponse(CommandSender notify, UUID uuid, String name, int banId, String action) {
         if (!isEnabled()) {
-            player.sendMessage(mm.deserialize("<red>Ban review is disabled."));
+            notify.sendMessage(mm.deserialize("<red>Ban review is disabled."));
             return;
         }
-        if (!plugin.getCouncilManager().isCouncilMember(player.getUniqueId())) {
-            player.sendMessage(mm.deserialize("<red>Only council members can review bans."));
+        if (!plugin.getCouncilManager().isCouncilMember(uuid)) {
+            notify.sendMessage(mm.deserialize("<red>Only council members can review bans."));
             return;
         }
 
         String act = action == null ? "" : action.trim().toLowerCase();
         if (!act.equals("reaffirm") && !act.equals("overturn")) {
-            player.sendMessage(mm.deserialize("<red>Usage: /councilreview <id> reaffirm|overturn"));
+            notify.sendMessage(mm.deserialize("<red>Usage: /councilreview <id> reaffirm|overturn"));
             return;
         }
 
         plugin.getDatabaseManager().getTrackedBanAsync(banId).thenAccept(ban -> {
             if (ban == null || !ban.active()) {
                 Bukkit.getScheduler().runTask(plugin, () ->
-                        player.sendMessage(mm.deserialize("<red>Ban review not found or already resolved.")));
+                        notify.sendMessage(mm.deserialize("<red>Ban review not found or already resolved.")));
                 return;
             }
             // Expiry check
             if (ban.firstPromptedAt() != null
                     && ban.firstPromptedAt() + expireMs() < System.currentTimeMillis()) {
                 Bukkit.getScheduler().runTask(plugin, () ->
-                        player.sendMessage(mm.deserialize("<red>This ban review has expired.")));
+                        notify.sendMessage(mm.deserialize("<red>This ban review has expired.")));
                 return;
             }
-            if (ban.bannedByUuid() != null && ban.bannedByUuid().equals(player.getUniqueId())) {
+            if (ban.bannedByUuid() != null && ban.bannedByUuid().equals(uuid)) {
                 Bukkit.getScheduler().runTask(plugin, () ->
-                        player.sendMessage(mm.deserialize(
+                        notify.sendMessage(mm.deserialize(
                                 "<red>You proposed this ban — you cannot review it.")));
                 return;
             }
 
-            plugin.getDatabaseManager().hasBanReviewResponseAsync(banId, player.getUniqueId())
+            plugin.getDatabaseManager().hasBanReviewResponseAsync(banId, uuid)
                     .thenAccept(already -> {
                         if (already) {
                             Bukkit.getScheduler().runTask(plugin, () ->
-                                    player.sendMessage(mm.deserialize(
+                                    notify.sendMessage(mm.deserialize(
                                             "<red>You already responded to this ban review.")));
                             return;
                         }
                         Bukkit.getScheduler().runTask(plugin, () -> {
                             if (act.equals("reaffirm")) {
-                                doReaffirm(player, ban);
+                                doReaffirm(notify, uuid, name, ban);
                             } else {
-                                doOverturn(player, ban);
+                                doOverturn(notify, uuid, name, ban);
                             }
                         });
                     });
         });
     }
 
-    private void doReaffirm(Player player, TrackedBan ban) {
-        plugin.getDatabaseManager().saveBanReviewResponse(ban.id(), player.getUniqueId(), "REAFFIRM");
-        plugin.getDatabaseManager().log(player.getName() + " reaffirmed ban of " + ban.targetName()
+    private void doReaffirm(CommandSender notify, UUID uuid, String name, TrackedBan ban) {
+        plugin.getDatabaseManager().saveBanReviewResponse(ban.id(), uuid, "REAFFIRM");
+        plugin.getDatabaseManager().log(name + " reaffirmed ban of " + ban.targetName()
                 + " (tracked #" + ban.id() + ")");
 
         plugin.getDatabaseManager().findActivePardonForTargetAsync(ban.targetName())
                 .thenAccept(pardon -> Bukkit.getScheduler().runTask(plugin, () -> {
                     if (pardon != null && pardon.isActive()) {
-                        plugin.getProposalManager().voteAllowChange(player, pardon.getId(), false);
-                        player.sendMessage(mm.deserialize(
+                        plugin.getProposalManager().voteAllowChange(notify, uuid, name, pardon.getId(), false);
+                        notify.sendMessage(mm.deserialize(
                                 "<green>Reaffirmed.</green> <gray>Voted <red>NO</red> on open pardon #"
                                         + pardon.getId() + "."));
                     } else {
-                        player.sendMessage(mm.deserialize(
+                        notify.sendMessage(mm.deserialize(
                                 "<green>Reaffirmed.</green> <gray>No open pardon — ban stands for your review."));
                     }
                 }));
     }
 
-    private void doOverturn(Player player, TrackedBan ban) {
-        plugin.getDatabaseManager().saveBanReviewResponse(ban.id(), player.getUniqueId(), "OVERTURN");
-        plugin.getDatabaseManager().log(player.getName() + " sought overturn of ban of " + ban.targetName()
+    private void doOverturn(CommandSender notify, UUID uuid, String name, TrackedBan ban) {
+        plugin.getDatabaseManager().saveBanReviewResponse(ban.id(), uuid, "OVERTURN");
+        plugin.getDatabaseManager().log(name + " sought overturn of ban of " + ban.targetName()
                 + " (tracked #" + ban.id() + ")");
 
         plugin.getDatabaseManager().findActivePardonForTargetAsync(ban.targetName())
                 .thenAccept(existing -> {
                     if (existing != null && existing.isActive()) {
                         Bukkit.getScheduler().runTask(plugin, () -> {
-                            plugin.getProposalManager().voteAllowChange(player, existing.getId(), true);
-                            player.sendMessage(mm.deserialize(
+                            plugin.getProposalManager().voteAllowChange(notify, uuid, name, existing.getId(), true);
+                            notify.sendMessage(mm.deserialize(
                                     "<green>Voted <white>YES</white> on open pardon #"
                                             + existing.getId() + "."));
                         });
@@ -289,7 +294,7 @@ public class BanReviewManager {
                                 String reason = "Council review overturn of: "
                                         + (ban.reason() != null ? ban.reason() : "ban #" + ban.id());
                                 plugin.getProposalManager().createProposal(
-                                        player, type, ban.targetName(),
+                                        notify, uuid, name, type, ban.targetName(),
                                         String.valueOf(votes), reason);
                                 // Proposer auto-votes yes once the proposal exists (short delay for async insert)
                                 Bukkit.getScheduler().runTaskLater(plugin, () ->
@@ -299,10 +304,10 @@ public class BanReviewManager {
                                                     if (p != null && p.isActive()) {
                                                         Bukkit.getScheduler().runTask(plugin, () ->
                                                                 plugin.getProposalManager()
-                                                                        .voteAllowChange(player, p.getId(), true));
+                                                                        .voteAllowChange(notify, uuid, name, p.getId(), true));
                                                     }
                                                 }), 20L);
-                                player.sendMessage(mm.deserialize(
+                                notify.sendMessage(mm.deserialize(
                                         "<green>Opened a " + type.name()
                                                 + " proposal for <white>" + ban.targetName()
                                                 + "</white> (needs " + votes + " yes votes)."));

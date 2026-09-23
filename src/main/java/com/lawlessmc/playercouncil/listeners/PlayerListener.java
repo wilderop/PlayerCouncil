@@ -39,7 +39,19 @@ public class PlayerListener implements Listener {
                     plugin.getBanReviewManager().onCouncilMemberJoin(player);
                 }
             }, 40L);
+            plugin.getServer().getScheduler().runTaskLater(plugin, () -> {
+                if (player.isOnline()) {
+                    com.lawlessmc.playercouncil.commands.BugCommand.sendPendingTo(plugin, player);
+                }
+            }, 70L);
         });
+        // PlayerDataSync applies Fabric stats a tick or two after join. Recapture
+        // so sky time is in the activity delta even if they logged out on Fabric.
+        plugin.getServer().getScheduler().runTaskLater(plugin, () -> {
+            if (player.isOnline()) {
+                captureAndStore(player);
+            }
+        }, 40L);
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
