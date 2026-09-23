@@ -5,7 +5,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>com.lawlessmc</groupId>
     <artifactId>PlayerCouncil</artifactId>
-    <version>1.0.0</version>
+    <version>1.2.0</version>
     <packaging>jar</packaging>
     <name>PlayerCouncil</name>
     <description>Ranks players by activity and forms a Player Council with voting powers</description>
@@ -36,6 +36,16 @@
             <artifactId>gson</artifactId>
             <version>2.11.0</version>
         </dependency>
+        <dependency>
+            <groupId>redis.clients</groupId>
+            <artifactId>jedis</artifactId>
+            <version>4.4.6</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-pool2</artifactId>
+            <version>2.11.1</version>
+        </dependency>
     </dependencies>
     <build>
         <plugins>
@@ -64,6 +74,18 @@
                                 <relocation>
                                     <pattern>com.google.gson</pattern>
                                     <shadedPattern>com.lawlessmc.playercouncil.lib.gson</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>redis.clients</pattern>
+                                    <shadedPattern>com.lawlessmc.playercouncil.lib.jedis</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>org.apache.commons.pool2</pattern>
+                                    <shadedPattern>com.lawlessmc.playercouncil.lib.pool2</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>org.json</pattern>
+                                    <shadedPattern>com.lawlessmc.playercouncil.lib.json</shadedPattern>
                                 </relocation>
                             </relocations>
                             <minimizeJar>false</minimizeJar>

@@ -1,15 +1,34 @@
 package com.lawlessmc.playercouncil;
 
+import com.lawlessmc.playercouncil.bridge.CommandBridge;
 import com.lawlessmc.playercouncil.commands.*;
 import com.lawlessmc.playercouncil.listeners.PlayerListener;
-import com.lawlessmc.playercouncil.managers.*;
+import com.lawlessmc.playercouncil.managers.ActivityManager;
+import com.lawlessmc.playercouncil.managers.BanReviewManager;
+import com.lawlessmc.playercouncil.managers.BanVoteManager;
+import com.lawlessmc.playercouncil.managers.CouncilManager;
+import com.lawlessmc.playercouncil.managers.DiscordLinkManager;
+import com.lawlessmc.playercouncil.managers.DisplayManager;
+import com.lawlessmc.playercouncil.managers.ProposalManager;
 import com.lawlessmc.playercouncil.storage.DatabaseManager;
+import com.lawlessmc.playercouncil.health.HealthSnapshotter;
 import com.lawlessmc.playercouncil.util.DiscordWebhook;
+import com.lawlessmc.playercouncil.util.CouncilWebClient;
 import com.lawlessmc.playercouncil.util.TrackedStats;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import org.bukkit.plugin.java.JavaPlugin;
 
+import java.nio.charset.StandardCharsets;
+import java.nio.file.DirectoryStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.*;
 import java.time.temporal.TemporalAdjusters;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.UUID;
 
 public class PlayerCouncilPlugin extends JavaPlugin {
 
@@ -23,7 +42,11 @@ public class PlayerCouncilPlugin extends JavaPlugin {
     private BanReviewManager banReviewManager;
     private DisplayManager displayManager;
     private DiscordWebhook discordWebhook;
+    private DiscordLinkManager discordLinkManager;
+    private CouncilWebClient councilWebClient;
+    private HealthSnapshotter healthSnapshotter;
     private TrackedStats trackedStats;
+    private CommandBridge commandBridge;
 
     @Override
     public void onEnable() {
@@ -40,9 +63,15 @@ public class PlayerCouncilPlugin extends JavaPlugin {
         this.banReviewManager = new BanReviewManager(this);
         this.displayManager = new DisplayManager(this);
         this.discordWebhook = new DiscordWebhook(this);
+        this.discordLinkManager = new DiscordLinkManager(this);
+        this.councilWebClient = new CouncilWebClient(this);
+        this.healthSnapshotter = new HealthSnapshotter(this);
         this.trackedStats = new TrackedStats(this);
 
         registerCommands();
+        this.commandBridge = new CommandBridge(this);
+        this.commandBridge.start();
+        this.healthSnapshotter.start();
         getServer().getPluginManager().registerEvents(new PlayerListener(this), this);
         getServer().getPluginManager().registerEvents(new com.lawlessmc.playercouncil.listeners.BanListener(this), this);
         this.displayManager.start();
@@ -61,8 +90,13 @@ public class PlayerCouncilPlugin extends JavaPlugin {
                             getLogger().info("Loaded " + list.size()
                                     + " council seats from database (next change on weekly schedule).");
                         }
+                        discordLinkManager.logReady();
+                        getServer().getScheduler().runTaskLater(this, discordLinkManager::syncAll, 40L);
                     }));
         }, 40L);
+
+        // Fabric join/quit deltas (logout/login on sky without touching survival)
+        getServer().getScheduler().runTaskTimerAsynchronously(this, this::ingestFabricActivity, 40L, 40L);
 
         // Daily prune of snapshots older than 30 days
         getServer().getScheduler().runTaskTimerAsynchronously(this, () ->
@@ -76,6 +110,12 @@ public class PlayerCouncilPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        if (commandBridge != null) {
+            commandBridge.stop();
+        }
+        if (healthSnapshotter != null) {
+            healthSnapshotter.stop();
+        }
         if (displayManager != null) {
             displayManager.stop();
         }
@@ -86,7 +126,9 @@ public class PlayerCouncilPlugin extends JavaPlugin {
     }
 
     private void registerCommands() {
-        getCommand("council").setExecutor(new CouncilCommand(this));
+        CouncilCommand councilCmd = new CouncilCommand(this);
+        getCommand("council").setExecutor(councilCmd);
+        getCommand("council").setTabCompleter(councilCmd);
         getCommand("proposals").setExecutor(new ProposalsCommand(this));
         getCommand("propose").setExecutor(new ProposeCommand(this));
         getCommand("councilvote").setExecutor(new VoteCommand(this));
@@ -98,6 +140,12 @@ public class PlayerCouncilPlugin extends JavaPlugin {
         }
         if (getCommand("councilreview") != null) {
             getCommand("councilreview").setExecutor(new CouncilReviewCommand(this));
+        }
+        if (getCommand("councilweb") != null) {
+            getCommand("councilweb").setExecutor(new CouncilWebCommand(this));
+        }
+        if (getCommand("bug") != null) {
+            getCommand("bug").setExecutor(new BugCommand(this));
         }
     }
 
@@ -143,6 +191,39 @@ public class PlayerCouncilPlugin extends JavaPlugin {
         return Math.max(1L, millis / 50L);
     }
 
+    private void ingestFabricActivity() {
+        Path dir = Path.of("/mnt/pool/skygate/council-snaps");
+        if (!Files.isDirectory(dir)) {
+            return;
+        }
+        try (DirectoryStream<Path> ds = Files.newDirectoryStream(dir, "*.json")) {
+            for (Path file : ds) {
+                try {
+                    JsonObject o = JsonParser.parseString(Files.readString(file, StandardCharsets.UTF_8)).getAsJsonObject();
+                    Files.deleteIfExists(file);
+                    if (!o.has("uuid") || !o.has("deltas")) continue;
+                    UUID uuid = UUID.fromString(o.get("uuid").getAsString());
+                    String name = o.has("name") ? o.get("name").getAsString() : "";
+                    long ts = o.has("timestamp") ? o.get("timestamp").getAsLong() : System.currentTimeMillis();
+                    Map<String, Long> deltas = new LinkedHashMap<>();
+                    JsonObject d = o.getAsJsonObject("deltas");
+                    for (Map.Entry<String, JsonElement> e : d.entrySet()) {
+                        try {
+                            long v = e.getValue().getAsLong();
+                            if (v > 0) deltas.put(e.getKey(), v);
+                        } catch (Exception ignored) {}
+                    }
+                    if (!deltas.isEmpty()) {
+                        databaseManager.applyFabricDeltas(uuid, name, ts, deltas);
+                    }
+                } catch (Exception e) {
+                    getLogger().warning("Fabric activity snap " + file.getFileName() + ": " + e.getMessage());
+                }
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
     public static PlayerCouncilPlugin getInstance() {
         return instance;
     }
@@ -177,6 +258,14 @@ public class PlayerCouncilPlugin extends JavaPlugin {
 
     public DiscordWebhook getDiscordWebhook() {
         return discordWebhook;
+    }
+
+    public DiscordLinkManager getDiscordLinkManager() {
+        return discordLinkManager;
+    }
+
+    public CouncilWebClient getCouncilWebClient() {
+        return councilWebClient;
     }
 
     public TrackedStats getTrackedStats() {

@@ -32,12 +32,13 @@ public class ActivityCommand implements CommandExecutor {
             UUID targetUuid;
             String displayName;
             if (who.equalsIgnoreCase("me")) {
-                if (!(sender instanceof Player player)) {
+                UUID self = com.lawlessmc.playercouncil.bridge.Actors.uuid(sender);
+                if (self == null) {
                     sender.sendMessage("Players only for /activity me.");
                     return true;
                 }
-                targetUuid = player.getUniqueId();
-                displayName = player.getName();
+                targetUuid = self;
+                displayName = com.lawlessmc.playercouncil.bridge.Actors.name(sender);
             } else {
                 OfflinePlayer off = resolveOffline(who);
                 if (off == null || (!off.hasPlayedBefore() && !off.isOnline())) {

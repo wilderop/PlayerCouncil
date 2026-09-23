@@ -5,7 +5,8 @@ import net.kyori.adventure.text.minimessage.MiniMessage;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
-import org.bukkit.entity.Player;
+
+import java.util.UUID;
 
 public class CouncilReviewCommand implements CommandExecutor {
 
@@ -18,22 +19,24 @@ public class CouncilReviewCommand implements CommandExecutor {
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-        if (!(sender instanceof Player player)) {
+        UUID actor = com.lawlessmc.playercouncil.bridge.Actors.uuid(sender);
+        if (actor == null) {
             sender.sendMessage("Players only.");
             return true;
         }
+        String actorName = com.lawlessmc.playercouncil.bridge.Actors.name(sender);
         if (args.length < 2) {
-            player.sendMessage(mm.deserialize("<red>Usage: /councilreview <banId> reaffirm|overturn"));
+            sender.sendMessage(mm.deserialize("<red>Usage: /councilreview <banId> reaffirm|overturn"));
             return true;
         }
         int banId;
         try {
             banId = Integer.parseInt(args[0]);
         } catch (NumberFormatException e) {
-            player.sendMessage(mm.deserialize("<red>Invalid ban id."));
+            sender.sendMessage(mm.deserialize("<red>Invalid ban id."));
             return true;
         }
-        plugin.getBanReviewManager().handleResponse(player, banId, args[1]);
+        plugin.getBanReviewManager().handleResponse(sender, actor, actorName, banId, args[1]);
         return true;
     }
 }

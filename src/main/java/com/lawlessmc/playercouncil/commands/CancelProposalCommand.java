@@ -5,7 +5,8 @@ import net.kyori.adventure.text.minimessage.MiniMessage;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
-import org.bukkit.entity.Player;
+
+import java.util.UUID;
 
 public class CancelProposalCommand implements CommandExecutor {
 
@@ -18,12 +19,14 @@ public class CancelProposalCommand implements CommandExecutor {
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-        if (!(sender instanceof Player player)) {
+        UUID actor = com.lawlessmc.playercouncil.bridge.Actors.uuid(sender);
+        if (actor == null) {
             sender.sendMessage("Players only.");
             return true;
         }
+        String actorName = com.lawlessmc.playercouncil.bridge.Actors.name(sender);
         if (args.length < 1) {
-            player.sendMessage(mm.deserialize("<red>Usage: /cancelproposal <id>"));
+            sender.sendMessage(mm.deserialize("<red>Usage: /cancelproposal <id>"));
             return true;
         }
 
@@ -31,11 +34,11 @@ public class CancelProposalCommand implements CommandExecutor {
         try {
             id = Integer.parseInt(args[0]);
         } catch (NumberFormatException e) {
-            player.sendMessage(mm.deserialize("<red>Invalid proposal id."));
+            sender.sendMessage(mm.deserialize("<red>Invalid proposal id."));
             return true;
         }
 
-        plugin.getProposalManager().cancel(player, id);
+        plugin.getProposalManager().cancel(sender, actor, actorName, id);
         return true;
     }
 }
