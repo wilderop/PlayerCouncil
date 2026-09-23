@@ -62,11 +62,36 @@ discord:
   webhook-url: ""
   username: "Player Council"
   bot-token: ""
+  bot-token-file: ""
+  guild-id: "1533577292851183879"
+  council-role-id: "1549609974072746066"
+  council-channel-id: "1549613458767609936"
+  invite-url: "https://discord.gg/Z23akyxpQZ"
   proposals-channel-id: ""
   use-forum: false
 
+council-web:
+  enabled: true
+  url: "https://dontplaythisserver.com/api/councilweb/login-code"
+  public-base: "https://dontplaythisserver.com"
+  token-file: ""
+  token: ""
+  code-ttl-seconds: 120
+  cooldown-seconds: 30
+  health-interval-seconds: 15
+
 plugins:
   whitelist: []
+
+bugs:
+  cooldown-seconds: 600
+  min-length: 8
+  max-length: 240
+  max-open-per-player: 3
+  max-per-day: 3
+  min-hours: 1
+  list-limit: 15
+  auto-block-false-closes: 3
 
 messages:
   prefix: "<gray>[<gold>Council</gold>]</gray> "

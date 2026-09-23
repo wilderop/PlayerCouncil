@@ -1,9 +1,15 @@
 package com.lawlessmc.playercouncil.util;
 
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
 import com.lawlessmc.playercouncil.PlayerCouncilPlugin;
 import org.bukkit.Statistic;
 import org.bukkit.entity.Player;
 
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.*;
 
 /**
@@ -56,6 +62,35 @@ public class TrackedStats {
             loaded.add(def(Statistic.MOB_KILLS, 1.0, 1.0));
         }
         this.definitions = List.copyOf(loaded);
+        publishTrackedList();
+    }
+
+    /** Fabric reads this list so new /counciladmin stat add entries are captured without a Fabric rebuild. */
+    public void publishTrackedList() {
+        try {
+            Path dir = Path.of("/mnt/pool/skygate");
+            Files.createDirectories(dir);
+            JsonArray arr = new JsonArray();
+            boolean hasPlay = false;
+            for (Definition d : definitions) {
+                arr.add(d.name());
+                if ("PLAY_ONE_MINUTE".equals(d.name())) {
+                    hasPlay = true;
+                }
+            }
+            if (!hasPlay) {
+                arr.add("PLAY_ONE_MINUTE");
+            }
+            JsonObject o = new JsonObject();
+            o.add("stats", arr);
+            o.addProperty("updated", System.currentTimeMillis());
+            Path dest = dir.resolve("council-tracked-stats.json");
+            Path tmp = dest.resolveSibling(".council-tracked-stats.json.tmp");
+            Files.writeString(tmp, o.toString(), StandardCharsets.UTF_8);
+            Files.move(tmp, dest, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+        } catch (Exception e) {
+            plugin.getLogger().warning("Could not publish tracked stats for Fabric: " + e.getMessage());
+        }
     }
 
     private static Definition def(Statistic s, double w, double scale) {

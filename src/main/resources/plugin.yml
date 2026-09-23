@@ -10,7 +10,7 @@ softdepend: [SmartBan]
 commands:
   council:
     description: View council members and your status
-    usage: /council
+    usage: /council [link|unlink] [discord_username]
     permission: playercouncil.use
   proposals:
     description: List active proposals
@@ -47,6 +47,15 @@ commands:
     description: Respond to an automated ban review prompt
     usage: /councilreview <banId> reaffirm|overturn
     permission: playercouncil.council
+  councilweb:
+    description: Get a one-time link to the council panel
+    usage: /councilweb
+    aliases: [webcode, councilcode]
+  bug:
+    description: List open bugs or report a new one
+    usage: /bug [report <text>|reply <id> <text>|<id>]
+    aliases: [bugs]
+    permission: playercouncil.use
 
 permissions:
   playercouncil.use:
