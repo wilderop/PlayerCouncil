@@ -7,6 +7,7 @@ import net.kyori.adventure.text.minimessage.MiniMessage;
 import org.bukkit.Bukkit;
 import org.bukkit.GameRule;
 import org.bukkit.OfflinePlayer;
+import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.PluginManager;
@@ -28,29 +29,33 @@ public class ProposalManager {
     }
 
     public void createProposal(Player proposer, Proposal.Type type, String target, String value, String reason) {
+        createProposal(proposer, proposer.getUniqueId(), proposer.getName(), type, target, value, reason);
+    }
+
+    public void createProposal(CommandSender notify, UUID uuid, String name, Proposal.Type type, String target, String value, String reason) {
         long timeoutDays = plugin.getConfig().getLong("voting.proposal-timeout-days", 7);
         long expires = System.currentTimeMillis() + TimeUnit.DAYS.toMillis(timeoutDays);
         final String cleanReason = sanitizeReason(reason);
 
         plugin.getDatabaseManager().createProposalAsync(
-                        type, proposer.getUniqueId(), target, value, cleanReason, expires)
+                        type, uuid, target, value, cleanReason, expires)
                 .thenAccept(id -> Bukkit.getScheduler().runTask(plugin, () -> {
                     if (id < 0) {
-                        proposer.sendMessage(MiniMessage.miniMessage().deserialize("<red>Failed to create proposal."));
+                        notify.sendMessage(MiniMessage.miniMessage().deserialize("<red>Failed to create proposal."));
                         return;
                     }
                     String desc = describe(type, target, value);
                     if (cleanReason != null) desc = desc + " — " + cleanReason;
-                    String msg = proposer.getName() + " proposed: " + type.name() + " → " + target
+                    String msg = name + " proposed: " + type.name() + " → " + target
                             + (value != null ? " = " + value : "")
                             + (cleanReason != null ? " (" + cleanReason + ")" : "");
                     plugin.getDatabaseManager().log(msg);
-                    broadcast("<yellow>" + proposer.getName() + "</yellow> created proposal <gold>#" + id
+                    broadcast("<yellow>" + name + "</yellow> created proposal <gold>#" + id
                             + "</gold>: " + desc);
-                    proposer.sendMessage(MiniMessage.miniMessage().deserialize("<green>Proposal #" + id + " created."));
+                    notify.sendMessage(MiniMessage.miniMessage().deserialize("<green>Proposal #" + id + " created."));
 
                     String body = "**New Proposal #" + id + "** — " + desc + "\n"
-                            + "Proposer: **" + proposer.getName() + "**\n"
+                            + "Proposer: **" + name + "**\n"
                             + (cleanReason != null ? "Reason: **" + cleanReason + "**\n" : "")
                             + "In-game: `/councilvote " + id + " yes` or `/councilvote " + id + " no`";
                     plugin.getDiscordWebhook().createProposalThread(id, desc, body)
@@ -73,69 +78,81 @@ public class ProposalManager {
     }
 
     public void vote(Player voter, int proposalId, boolean yes) {
-        voteInternal(voter, proposalId, yes, false);
+        voteInternal(voter, voter.getUniqueId(), voter.getName(), proposalId, yes, false);
+    }
+
+    public void vote(CommandSender notify, UUID uuid, String name, int proposalId, boolean yes) {
+        voteInternal(notify, uuid, name, proposalId, yes, false);
     }
 
     /**
      * Vote that may overwrite a previous vote (used by automated ban review).
      */
     public void voteAllowChange(Player voter, int proposalId, boolean yes) {
-        voteInternal(voter, proposalId, yes, true);
+        voteInternal(voter, voter.getUniqueId(), voter.getName(), proposalId, yes, true);
     }
 
-    private void voteInternal(Player voter, int proposalId, boolean yes, boolean allowChange) {
+    public void voteAllowChange(CommandSender notify, UUID uuid, String name, int proposalId, boolean yes) {
+        voteInternal(notify, uuid, name, proposalId, yes, true);
+    }
+
+    private void voteInternal(CommandSender notify, UUID uuid, String name, int proposalId, boolean yes, boolean allowChange) {
         plugin.getDatabaseManager().getProposalAsync(proposalId).thenAccept(p -> {
             if (p == null || !p.isActive()) {
                 Bukkit.getScheduler().runTask(plugin, () ->
-                        voter.sendMessage(MiniMessage.miniMessage().deserialize(
+                        notify.sendMessage(MiniMessage.miniMessage().deserialize(
                                 "<red>Could not vote (invalid id or proposal closed).")));
                 return;
             }
-            if (!allowChange && p.hasVoted(voter.getUniqueId())) {
+            if (!allowChange && p.hasVoted(uuid)) {
                 Bukkit.getScheduler().runTask(plugin, () ->
-                        voter.sendMessage(MiniMessage.miniMessage().deserialize("<red>You already voted.")));
+                        notify.sendMessage(MiniMessage.miniMessage().deserialize("<red>You already voted.")));
                 return;
             }
 
-            plugin.getDatabaseManager().saveVote(proposalId, voter.getUniqueId(), yes);
-            p.addVote(voter.getUniqueId(), yes);
+            plugin.getDatabaseManager().saveVote(proposalId, uuid, yes);
+            p.addVote(uuid, yes);
 
             Bukkit.getScheduler().runTask(plugin, () -> {
                 String voteStr = yes ? "<green>YES</green>" : "<red>NO</red>";
-                broadcast("<yellow>" + voter.getName() + "</yellow> voted " + voteStr
+                broadcast("<yellow>" + name + "</yellow> voted " + voteStr
                         + " on proposal <gold>#" + proposalId + "</gold>");
-                String discordLine = voter.getName() + " voted **" + (yes ? "YES" : "NO")
+                String discordLine = name + " voted **" + (yes ? "YES" : "NO")
                         + "** on proposal #" + proposalId
                         + " (Yes: " + p.getYesCount() + " | No: " + p.getNoCount() + ")";
                 plugin.getDiscordWebhook().postToThread(p.getDiscordThreadId(), discordLine);
-                plugin.getDatabaseManager().log(voter.getName() + " voted " + (yes ? "yes" : "no")
+                plugin.getDatabaseManager().log(name + " voted " + (yes ? "yes" : "no")
                         + " on #" + proposalId);
-                voter.sendMessage(MiniMessage.miniMessage().deserialize("<green>Vote recorded."));
+                notify.sendMessage(MiniMessage.miniMessage().deserialize("<green>Vote recorded."));
                 checkAndExecute(p);
             });
         });
     }
 
     public void cancel(Player player, int proposalId) {
+        cancel(player, player.getUniqueId(), player.getName(), proposalId);
+    }
+
+    public void cancel(CommandSender notify, UUID uuid, String name, int proposalId) {
         plugin.getDatabaseManager().getProposalAsync(proposalId).thenAccept(p -> {
             Bukkit.getScheduler().runTask(plugin, () -> {
                 if (p == null || !p.isActive()) {
-                    player.sendMessage(MiniMessage.miniMessage().deserialize(
+                    notify.sendMessage(MiniMessage.miniMessage().deserialize(
                             "<red>Could not cancel (already closed)."));
                     return;
                 }
-                if (!p.getProposer().equals(player.getUniqueId())) {
-                    player.sendMessage(MiniMessage.miniMessage().deserialize(
+                if (!p.getProposer().equals(uuid)) {
+                    notify.sendMessage(MiniMessage.miniMessage().deserialize(
                             "<red>Only the proposer can cancel."));
                     return;
                 }
                 plugin.getDatabaseManager().markProposalCancelled(proposalId);
-                broadcast("<yellow>" + player.getName() + "</yellow> cancelled proposal <gold>#"
+                broadcast("<yellow>" + name + "</yellow> cancelled proposal <gold>#"
                         + proposalId + "</gold>");
                 plugin.getDiscordWebhook().postToThread(p.getDiscordThreadId(),
-                        "❌ **" + player.getName() + "** cancelled proposal #" + proposalId);
-                plugin.getDatabaseManager().log(player.getName() + " cancelled proposal #" + proposalId);
-                player.sendMessage(MiniMessage.miniMessage().deserialize("<green>Proposal cancelled."));
+                        "❌ **" + name + "** cancelled proposal #" + proposalId);
+                plugin.getDatabaseManager().log(name + " cancelled proposal #" + proposalId);
+                notify.sendMessage(MiniMessage.miniMessage().deserialize("<green>Proposal cancelled."));
             });
         });
     }
